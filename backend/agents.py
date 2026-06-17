@@ -7,18 +7,30 @@ class ActuarialAgents:
         self.model_name = "gemini-2.5-flash"
 
     def _call_llm(self, sys_instruction: str, prompt: str) -> str:
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=genai.types.GenerateContentConfig(
-                    system_instruction=sys_instruction,
-                    temperature=0.3
+        import time
+        models_to_try = [self.model_name, "gemini-2.0-flash", "gemini-1.5-flash"]
+        last_error = ""
+        
+        for attempt in range(3):
+            model = models_to_try[attempt % len(models_to_try)]
+            try:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        system_instruction=sys_instruction,
+                        temperature=0.3
+                    )
                 )
-            )
-            return response.text
-        except Exception as e:
-            return f"Error connecting to Gemini: {str(e)}"
+                return response.text
+            except Exception as e:
+                last_error = str(e)
+                if "429" in last_error or "503" in last_error:
+                    time.sleep(2) # Wait and try again (possibly with fallback model)
+                    continue
+                break # Break immediately on 400 Bad Request or other fatal errors
+                
+        return f"Error connecting to Gemini after retries: {last_error}"
 
     def narrate_data_summary(self, summary_data: dict) -> str:
         sys_inst = "You are an expert Actuarial Data Summary Agent. Output ONLY HTML snippets (no markdown wrappers like ```html)."
@@ -73,15 +85,27 @@ class ActuarialAgents:
             contents.append(genai.types.Content(role=role, parts=[genai.types.Part.from_text(msg['text'])]))
         contents.append(genai.types.Content(role='user', parts=[genai.types.Part.from_text(message)]))
         
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=contents,
-                config=genai.types.GenerateContentConfig(
-                    system_instruction=sys_inst,
-                    temperature=0.5
+        import time
+        models_to_try = [self.model_name, "gemini-2.0-flash", "gemini-1.5-flash"]
+        last_error = ""
+        
+        for attempt in range(3):
+            model = models_to_try[attempt % len(models_to_try)]
+            try:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=genai.types.GenerateContentConfig(
+                        system_instruction=sys_inst,
+                        temperature=0.5
+                    )
                 )
-            )
-            return response.text
-        except Exception as e:
-            return f"Error: {str(e)}"
+                return response.text
+            except Exception as e:
+                last_error = str(e)
+                if "429" in last_error or "503" in last_error:
+                    time.sleep(2)
+                    continue
+                break
+                
+        return f"Error after retries: {last_error}"
