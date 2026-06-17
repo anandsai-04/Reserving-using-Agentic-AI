@@ -88,16 +88,26 @@ class Triangle:
             dev_set.add(dev)
             
             key = f"{ay}|{dev}"
-            self._raw_data[key] = {
-                'paid': float(row[paid_col]) if paid_col and pd.notna(row[paid_col]) else None,
-                'incurred': float(row[inc_col]) if inc_col and pd.notna(row[inc_col]) else None,
-                'count': float(row[cnt_col]) if cnt_col and pd.notna(row[cnt_col]) else None
-            }
+            if key not in self._raw_data:
+                self._raw_data[key] = {'paid': 0, 'incurred': 0, 'count': 0}
+                
+            paid_val = float(row[paid_col]) if paid_col and pd.notna(row[paid_col]) else 0
+            inc_val = float(row[inc_col]) if inc_col and pd.notna(row[inc_col]) else 0
+            cnt_val = float(row[cnt_col]) if cnt_col and pd.notna(row[cnt_col]) else 0
             
+            # Since some values might be missing initially, we replace None with 0 above but we must handle if we want them to stay None if completely missing.
+            # To keep it simple, if we ever see a valid number, we add it.
+            if pd.notna(paid_val): self._raw_data[key]['paid'] = (self._raw_data[key].get('paid') or 0) + paid_val
+            if pd.notna(inc_val): self._raw_data[key]['incurred'] = (self._raw_data[key].get('incurred') or 0) + inc_val
+            if pd.notna(cnt_val): self._raw_data[key]['count'] = (self._raw_data[key].get('count') or 0) + cnt_val
+            
+            # For premium and exposure, they are usually per Accident Year, but if long format repeats them, we shouldn't sum them across all Dev Ages blindly.
+            # Usually, in CAS data, premium is repeated on every row for that AY.
+            # So we should just take the max or the first one we see, rather than sum.
             if prem_col and pd.notna(row[prem_col]):
-                self.premiums[ay] = float(row[prem_col])
+                self.premiums[ay] = max(self.premiums.get(ay, 0), float(row[prem_col]))
             if exp_col and pd.notna(row[exp_col]):
-                self.exposures[ay] = float(row[exp_col])
+                self.exposures[ay] = max(self.exposures.get(ay, 0), float(row[exp_col]))
                 
         self.accident_years = sorted(list(ay_set))
         dev_ages = sorted(list(dev_set))
