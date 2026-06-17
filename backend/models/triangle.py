@@ -101,13 +101,29 @@ class Triangle:
             if pd.notna(inc_val): self._raw_data[key]['incurred'] = (self._raw_data[key].get('incurred') or 0) + inc_val
             if pd.notna(cnt_val): self._raw_data[key]['count'] = (self._raw_data[key].get('count') or 0) + cnt_val
             
-            # For premium and exposure, they are usually per Accident Year, but if long format repeats them, we shouldn't sum them across all Dev Ages blindly.
-            # Usually, in CAS data, premium is repeated on every row for that AY.
-            # So we should just take the max or the first one we see, rather than sum.
+            # To handle premium safely for multi-company datasets without multiplying it by the number of development periods,
+            # we should track it by company code if available. Otherwise, we assume it's single company.
+            comp_col = self._best_col(df, ['grcode', 'company', 'code', 'id', 'name'])
+            comp = row[comp_col] if comp_col and pd.notna(row[comp_col]) else 'default'
+            
             if prem_col and pd.notna(row[prem_col]):
-                self.premiums[ay] = max(self.premiums.get(ay, 0), float(row[prem_col]))
+                if not hasattr(self, '_comp_prems'): self._comp_prems = {}
+                key_prem = f"{comp}|{ay}"
+                self._comp_prems[key_prem] = float(row[prem_col])
             if exp_col and pd.notna(row[exp_col]):
-                self.exposures[ay] = max(self.exposures.get(ay, 0), float(row[exp_col]))
+                if not hasattr(self, '_comp_exps'): self._comp_exps = {}
+                key_exp = f"{comp}|{ay}"
+                self._comp_exps[key_exp] = float(row[exp_col])
+                
+        # Sum premiums across all companies for each AY
+        if hasattr(self, '_comp_prems'):
+            for k, val in self._comp_prems.items():
+                comp, ay = k.split('|')
+                self.premiums[int(ay)] = self.premiums.get(int(ay), 0) + val
+        if hasattr(self, '_comp_exps'):
+            for k, val in self._comp_exps.items():
+                comp, ay = k.split('|')
+                self.exposures[int(ay)] = self.exposures.get(int(ay), 0) + val
                 
         self.accident_years = sorted(list(ay_set))
         dev_ages = sorted(list(dev_set))

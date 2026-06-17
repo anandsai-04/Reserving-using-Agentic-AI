@@ -165,6 +165,7 @@ async function processFile(file) {
     State.csvText = data.csv_text;
     State.summary = data.summary;
     State.triangle = data.triangle;
+    State.customLDFs = null; // Clear any cached LDFs from previous runs
     
     addAgentMessage('system', `✓ Processed by Python backend.`);
     if (data.narration) addAgentMessage('agent', data.narration);
