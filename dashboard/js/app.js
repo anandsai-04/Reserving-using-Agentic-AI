@@ -306,12 +306,7 @@ async function processFile(file) {
     formData.append('business_description', bizDesc.value.trim());
   }
   
-  if (State.apiKey) {
-    formData.append('api_key', State.apiKey);
-    formData.append('base_url', State.baseUrl);
-    formData.append('model_name', State.modelName);
-  }
-
+  // API Settings are now handled exclusively on the backend via Render Environment Variables.
   try {
     const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
     if (!res.ok) throw new Error('Network response was not ok');
@@ -342,8 +337,9 @@ async function processPipelineStream(res) {
         const msg = JSON.parse(line);
         if (msg.type === "agent") {
           addAgentMessage('action', `<strong>[${msg.agent}]</strong> ${msg.text}`);
-          if (msg.agent === "System Error") {
-            updateAgentMessage(State.uploadMsgId, 'Pipeline aborted due to error.');
+          if (msg.agent === "System Error" || (msg.text && msg.text.includes("Agent Error"))) {
+            updateAgentMessage(State.uploadMsgId, 'Pipeline aborted due to backend error. Please check Render settings.');
+            return; // Abort further stream processing
           }
         } else if (msg.type === "input_required") {
           State.sessionId = msg.session_id; // Save it now so resume works
@@ -589,10 +585,7 @@ window.submitParams = async function(code) {
         session_id: State.sessionId,
         method_code: code,
         params: params,
-        custom_ldfs: [...State.customLDFs, State.tailFactor || 1.0], // add custom tail
-        api_key: State.apiKey,
-        base_url: State.baseUrl,
-        model_name: State.modelName
+        custom_ldfs: [...State.customLDFs, State.tailFactor || 1.0]
       })
     });
     const data = await res.json();
