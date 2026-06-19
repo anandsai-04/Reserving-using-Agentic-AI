@@ -20,10 +20,7 @@
     <div id="step-bar"></div>
 
     <div class="topbar-right">
-      <button class="api-key-btn" id="api-key-btn">
-        <div class="api-key-indicator" id="api-key-indicator" title="AI not connected"></div>
-        AI Settings
-      </button>
+      <!-- AI Settings removed per user request -->
     </div>
   </header>
 
@@ -53,27 +50,7 @@
 
 </div>
 
-<!-- ── API Key Modal ──────────────────────────────────────────── -->
-<div class="modal" id="api-key-modal">
-  <div class="modal-box">
-    <div class="modal-title">Universal AI Settings</div>
-    <div class="modal-sub">Configure any OpenAI-compatible API (OpenRouter, Groq, OpenAI, etc).</div>
-    
-    <label style="display:block; margin-top:12px; font-size:12px; color:rgba(255,255,255,0.6);">Base URL</label>
-    <input type="text" id="api-baseurl-input" class="modal-input" placeholder="https://openrouter.ai/api/v1">
-    
-    <label style="display:block; margin-top:12px; font-size:12px; color:rgba(255,255,255,0.6);">Model Name</label>
-    <input type="text" id="api-model-input" class="modal-input" placeholder="google/gemini-2.0-flash-exp:free">
-    
-    <label style="display:block; margin-top:12px; font-size:12px; color:rgba(255,255,255,0.6);">API Key</label>
-    <input type="password" id="api-key-input" class="modal-input" placeholder="sk-...">
-    
-    <div class="modal-actions" style="margin-top:20px;">
-      <button class="modal-cancel" id="api-key-cancel">Cancel</button>
-      <button class="modal-save" id="api-key-save">Save Settings</button>
-    </div>
-  </div>
-</div>
+<!-- Modal removed per user request -->
 
 <!-- Scripts — order matters -->
 <script src="js/app.js?v=16"></script>
