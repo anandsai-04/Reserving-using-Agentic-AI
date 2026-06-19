@@ -2,7 +2,23 @@
 // app.js — Agentic Frontend Client
 // ================================================================
 
-const API_BASE = 'http://localhost:8000/api';
+// Dynamically set API_BASE based on where the frontend is hosted
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_BASE = isLocalhost 
+  ? 'http://localhost:8000/api' 
+  : 'https://YOUR-RENDER-BACKEND.onrender.com/api'; // <--- REPLACE THIS ONCE BACKEND IS DEPLOYED
+
+window.__DEMO_TEXT__ = `Line of Business: Private Passenger Auto Liability (short-tail line).
+
+Data: 10 accident years of cumulative paid loss development data organized in a standard triangle format. No earned premium data is available in this dataset — only paid claims.
+
+Environment: The business environment has been relatively stable over the past decade. No significant changes in claims processing systems, management philosophy, or settlement speed. No major tort reform in the operating jurisdiction.
+
+Claims Profile: This is a high-frequency, low-severity portfolio. Claims are reported promptly and settle within 12–24 months in most cases. The average claim cost is modest, with no exposure to catastrophic single-loss events. Claims are evenly distributed throughout each accident year.
+
+Distortions: No known distortions from unusually large claims. No significant CAT events affected this portfolio. No changes in case reserve adequacy or claims adjuster behavior during the observed period.
+
+Data Volume: With 10 years of clean, consistent historical data, the triangle is credible enough for a data-driven development approach.`;
 
 const State = {
   step: 0,
@@ -18,6 +34,7 @@ const State = {
   apiKey: '',
   baseUrl: '',
   modelName: '',
+  pendingFile: null,
 };
 
 const STEPS = ['Ingestion Pipeline', 'Data Summary', 'Loss Triangle', 'Select Model', 'IBNR Results'];
@@ -153,18 +170,83 @@ function setRightPanel(view, data = {}) {
 }
 
 function renderUploadView() {
+  const rateChangesHTML = `
+    <div style="margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+        <label style="font-weight:500;">Historical Rate Changes (Optional):</label>
+        <button class="btn-ghost" onclick="addRateChangeRow()" style="font-size:12px; padding: 4px 8px;">+ Add Row</button>
+      </div>
+      <div id="rate-changes-container"></div>
+      <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 8px;">If provided, the Preprocessing Agent will on-level your premiums automatically before the Triangle Builder runs.</div>
+    </div>
+  `;
+
+  const descriptionHTML = `
+    <div style="margin-top: 20px; padding: 16px; background: rgba(167, 139, 250, 0.05); border: 1px solid rgba(167, 139, 250, 0.2); border-radius: 8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+        <label style="font-weight: 600; color: #a78bfa; font-size: 13px;">✦ Business & Data Context (for AI model recommendation)</label>
+        <button class="btn-ghost" onclick="fillDemoDescription()" style="font-size:11px; padding: 3px 10px; color: #a78bfa; border-color: rgba(167,139,250,0.4);">Try Demo ✦</button>
+      </div>
+      <textarea
+        id="business-description"
+        rows="6"
+        style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 10px; font-size: 13px; resize: vertical; box-sizing: border-box; line-height: 1.5;"
+        placeholder="Describe your data and business context to help the AI recommend the right model. Key points to include:
+• Line of business (e.g., auto liability, workers' comp, property)
+• Tail length (short-tail or long-tail?)
+• Data volume & history (how many years of data?)
+• Environment stability (any major changes in operations, legal environment, settlement speed?)
+• Claims characteristics (high-frequency/low-severity vs large sporadic claims?)
+• Any known distortions (large CAT events, case reserve changes?)"></textarea>
+      <div style="font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 6px;">The more detail you provide, the more accurate and specific the AI's model recommendation will be.</div>
+    </div>
+  `;
+
   return `
     <div class="view-header"><h2>Upload Loss Data</h2><p class="view-sub">Sequential Agent Pipeline</p></div>
-    <div style="margin-bottom: 24px; padding: 16px; background: rgba(255,255,255,0.05); border-radius: 8px;">
-      <label style="display:block; margin-bottom:8px; font-weight:500;">Loss Development Factor (LDF) configuration:</label>
-      <div style="display:flex; align-items:center; gap: 12px;">
-        <span>Calculate </span>
-        <input type="number" id="n-years-input" value="5" min="1" max="20" class="param-input" style="width: 80px;">
-        <span> year averages.</span>
-      </div>
+    ${rateChangesHTML}
+    <div class="dropzone" id="dropzone">
+      <div class="dz-icon" id="dz-icon">↑</div>
+      <div class="dz-title" id="dz-title">Drop CSV file here or click to browse</div>
+      <input type="file" id="file-input" accept=".csv,.txt" style="display:none">
     </div>
-    <div class="dropzone" id="dropzone"><div class="dz-icon">↑</div><div class="dz-title">Drop CSV file here</div><input type="file" id="file-input" accept=".csv,.txt" style="display:none"></div>
+    <div id="file-preview" style="display:none; margin-top:10px; padding:10px 14px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.3); border-radius:6px; align-items:center; gap:10px;">
+      <span style="color:#10b981; font-size:18px;">✓</span>
+      <span id="file-preview-name" style="color:#10b981; font-size:13px; font-weight:600; flex:1;"></span>
+      <button onclick="clearSelectedFile()" style="background:none; border:none; color:rgba(255,255,255,0.4); cursor:pointer; font-size:16px; line-height:1;">✕</button>
+    </div>
+    ${descriptionHTML}
+    <button id="submit-pipeline-btn" onclick="submitUpload()" disabled
+      style="margin-top:24px; width:100%; padding:14px; border-radius:8px; border:none; cursor:not-allowed;
+             background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.3);
+             font-size:15px; font-weight:700; letter-spacing:0.5px; transition:all 0.3s;">
+      🚀 Run Pipeline →
+    </button>
+    <div id="submit-hint" style="font-size:11px; color:rgba(255,255,255,0.3); text-align:center; margin-top:8px;">Select a CSV file above to enable submission</div>
   `;
+}
+
+
+window.fillDemoDescription = function() {
+  const el = document.getElementById('business-description');
+  if (el) {
+    el.value = window.__DEMO_TEXT__;
+    el.style.borderColor = 'rgba(167,139,250,0.6)';
+    setTimeout(() => { el.style.borderColor = 'rgba(167,139,250,0.3)'; }, 800);
+  }
+}
+
+window.addRateChangeRow = function() {
+  const container = document.getElementById('rate-changes-container');
+  if(!container) return;
+  const row = document.createElement('div');
+  row.style = "display:flex; gap:8px; margin-bottom:8px;";
+  row.innerHTML = `
+    <input type="date" class="rc-date" style="flex:1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 8px; border-radius: 4px;">
+    <input type="number" class="rc-pct" placeholder="Change % (e.g. 5)" step="any" style="flex:1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 8px; border-radius: 4px;">
+    <button class="btn-ghost" onclick="this.parentElement.remove()" style="padding: 8px;">✕</button>
+  `;
+  container.appendChild(row);
 }
 
 function setupDropzone() {
@@ -174,19 +256,105 @@ function setupDropzone() {
   dz.addEventListener('click', () => input.click());
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
-  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); processFile(e.dataTransfer.files[0]); });
-  input.addEventListener('change', () => processFile(input.files[0]));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); previewFile(e.dataTransfer.files[0]); });
+  input.addEventListener('change', () => previewFile(input.files[0]));
+}
+
+function previewFile(file) {
+  if (!file) return;
+  State.pendingFile = file;
+  // Update dropzone appearance
+  const dz = document.getElementById('dropzone');
+  const dzTitle = document.getElementById('dz-title');
+  const dzIcon = document.getElementById('dz-icon');
+  if (dz) dz.style.borderColor = 'rgba(16,185,129,0.5)';
+  if (dzIcon) dzIcon.textContent = '📄';
+  if (dzTitle) dzTitle.textContent = 'File selected — see preview below';
+  // Show preview bar
+  const preview = document.getElementById('file-preview');
+  const previewName = document.getElementById('file-preview-name');
+  if (preview) { preview.style.display = 'flex'; }
+  if (previewName) previewName.textContent = `${file.name}  (${(file.size/1024).toFixed(1)} KB)`;
+  // Enable submit button
+  const btn = document.getElementById('submit-pipeline-btn');
+  const hint = document.getElementById('submit-hint');
+  if (btn) {
+    btn.disabled = false;
+    btn.style.cursor = 'pointer';
+    btn.style.background = 'linear-gradient(135deg, #a78bfa, #10b981)';
+    btn.style.color = 'white';
+    btn.style.boxShadow = '0 4px 20px rgba(167,139,250,0.4)';
+  }
+  if (hint) hint.textContent = 'All inputs ready — click to launch the pipeline';
+}
+
+window.clearSelectedFile = function() {
+  State.pendingFile = null;
+  const dz = document.getElementById('dropzone');
+  const dzTitle = document.getElementById('dz-title');
+  const dzIcon = document.getElementById('dz-icon');
+  if (dz) dz.style.borderColor = '';
+  if (dzIcon) dzIcon.textContent = '↑';
+  if (dzTitle) dzTitle.textContent = 'Drop CSV file here or click to browse';
+  const preview = document.getElementById('file-preview');
+  if (preview) preview.style.display = 'none';
+  const btn = document.getElementById('submit-pipeline-btn');
+  const hint = document.getElementById('submit-hint');
+  if (btn) {
+    btn.disabled = true;
+    btn.style.cursor = 'not-allowed';
+    btn.style.background = 'rgba(255,255,255,0.06)';
+    btn.style.color = 'rgba(255,255,255,0.3)';
+    btn.style.boxShadow = 'none';
+  }
+  if (hint) hint.textContent = 'Select a CSV file above to enable submission';
+  const fi = document.getElementById('file-input');
+  if (fi) fi.value = '';
+}
+
+window.submitUpload = function() {
+  if (!State.pendingFile) { showToast('Please select a CSV file first.', 'error'); return; }
+  const btn = document.getElementById('submit-pipeline-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Launching...'; }
+  processFile(State.pendingFile);
+  State.pendingFile = null;
 }
 
 async function processFile(file) {
   if (!file) return;
-  const nYears = document.getElementById('n-years-input').value || 5;
+  const nYears = 5; // Hardcoded default
   
+  const rate_changes = [];
+  let maxYear = null;
+  document.querySelectorAll('#rate-changes-container > div').forEach(row => {
+    const date = row.querySelector('.rc-date').value;
+    const pct = parseFloat(row.querySelector('.rc-pct').value);
+    if (date && !isNaN(pct)) {
+      rate_changes.push({ effective_date: date, rate_change: pct / 100.0 });
+      
+      const year = new Date(date).getFullYear();
+      if (!maxYear || year > maxYear) maxYear = year;
+    }
+  });
+  
+  const valYear = maxYear;
+
   const msgId = addAgentMessage('agent', `🚀 Launching Sequential Multi-Agent Pipeline for <strong>${file.name}</strong>...`, 'analyzing');
+  State.uploadMsgId = msgId;
   
   const formData = new FormData();
   formData.append('file', file);
   formData.append('n_years', nYears);
+  if (valYear) formData.append('valuation_year', valYear);
+  if (rate_changes.length > 0) {
+    formData.append('rate_changes_json', JSON.stringify(rate_changes));
+  }
+  
+  const bizDesc = document.getElementById('business-description');
+  if (bizDesc && bizDesc.value.trim()) {
+    formData.append('business_description', bizDesc.value.trim());
+  }
+  
   if (State.apiKey) {
     formData.append('api_key', State.apiKey);
     formData.append('base_url', State.baseUrl);
@@ -197,50 +365,111 @@ async function processFile(file) {
     const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
     if (!res.ok) throw new Error('Network response was not ok');
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const msg = JSON.parse(line);
-          if (msg.type === "agent") {
-            addAgentMessage('action', `<strong>[${msg.agent}]</strong> ${msg.text}`);
-            if (msg.agent === "System Error") {
-              updateAgentMessage(msgId, 'Pipeline aborted due to error.');
-            }
-          } else if (msg.type === "complete") {
-            State.sessionId = msg.session_id;
-            State.summary = msg.summary;
-            State.triangle = msg.triangle;
-            State.recommendation = msg.recommendation; // Save the recommendation
-            State.customLDFs = null;
-            
-            updateAgentMessage(msgId, 'Pipeline execution completed. See summary in right panel.');
-            setTimeout(() => {
-              advanceStep(1);
-              setRightPanel('summary', State.summary);
-            }, 1000);
-          } else if (msg.type === "error") {
-            updateAgentMessage(msgId, `Failed: ${msg.message}`);
-          }
-        } catch(err) {
-          console.error("Stream parse error:", err);
-        }
-      }
-    }
+    await processPipelineStream(res);
   } catch (e) {
     showToast('Pipeline Error: ' + e.message, 'error');
     updateAgentMessage(msgId, `Failed to process: ${e.message}`);
+  }
+}
+
+async function processPipelineStream(res) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const msg = JSON.parse(line);
+        if (msg.type === "agent") {
+          addAgentMessage('action', `<strong>[${msg.agent}]</strong> ${msg.text}`);
+          if (msg.agent === "System Error") {
+            updateAgentMessage(State.uploadMsgId, 'Pipeline aborted due to error.');
+          }
+        } else if (msg.type === "input_required") {
+          State.sessionId = msg.session_id; // Save it now so resume works
+          addAgentMessage('action', `<strong>[${msg.agent}]</strong> ${msg.prompt}`);
+          
+          const container = document.getElementById('agent-log');
+          const promptBox = document.createElement('div');
+          promptBox.className = 'agent-msg action';
+          promptBox.style = "border: 1px solid rgba(167, 139, 250, 0.4); background: rgba(167, 139, 250, 0.1); flex-direction: column; align-items: flex-start; padding: 12px;";
+          promptBox.innerHTML = `
+            <div style="margin-bottom: 12px; color: #a78bfa; font-weight: bold;">[${msg.agent}] Requires Input: Data Conditions</div>
+            <div style="font-size: 13px; color: #ddd; margin-bottom: 16px; line-height: 1.5;">
+              <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="cond-credible" value="true"> Large amount of credible historical claims data available</label>
+              <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer;"><input type="checkbox" id="cond-freq" value="true"> High-frequency, low-severity lines with stable/timely reporting</label>
+              <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer;"><input type="checkbox" id="cond-distort" value="true"> Presence/absence of large claims does not greatly distort data</label>
+            </div>
+            <div style="display:flex; justify-content:flex-end; width: 100%;">
+              <button class="btn-run" onclick="submitPipelineConditions(this)" style="padding: 6px 16px; font-size: 13px;">Submit & Resume →</button>
+            </div>
+          `;
+          container.appendChild(promptBox);
+          container.scrollTop = container.scrollHeight;
+          
+          return; 
+        } else if (msg.type === "complete") {
+          State.sessionId = msg.session_id;
+          State.summary = msg.summary;
+          State.triangle = msg.triangle;
+          State.recommendation = msg.recommendation; // Save the recommendation
+          State.customLDFs = null;
+          
+          updateAgentMessage(State.uploadMsgId, 'Pipeline execution completed. See summary in right panel.');
+          setTimeout(() => {
+            advanceStep(1);
+            setRightPanel('summary', State.summary);
+          }, 1000);
+        } else if (msg.type === "error") {
+          updateAgentMessage(State.uploadMsgId, `Failed: ${msg.message}`);
+        }
+      } catch(err) {
+        console.error("Stream parse error:", err);
+      }
+    }
+  }
+}
+
+window.submitPipelineConditions = function(btn) {
+  const conditions = {
+    credible: document.getElementById('cond-credible').checked,
+    freq: document.getElementById('cond-freq').checked,
+    distort: document.getElementById('cond-distort').checked
+  };
+  
+  // Disable inputs to show it's submitted
+  btn.disabled = true;
+  document.getElementById('cond-credible').disabled = true;
+  document.getElementById('cond-freq').disabled = true;
+  document.getElementById('cond-distort').disabled = true;
+  
+  resumePipeline(conditions);
+}
+
+async function resumePipeline(conditions) {
+  try {
+    const res = await fetch(`${API_BASE}/resume_pipeline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: State.sessionId,
+        conditions: conditions
+      })
+    });
+    
+    if (!res.ok) throw new Error('Network response was not ok');
+    await processPipelineStream(res);
+  } catch (e) {
+    showToast('Pipeline Resume Error: ' + e.message, 'error');
   }
 }
 
@@ -303,7 +532,7 @@ function renderTriangleView() {
           ${rowHtml('Straight', 'straightAvg')}
           ${rowHtml('3-Year', 'weighted3yr')}
           ${rowHtml('5-Year', 'weighted5yr')}
-          <tr class="ldf-row sel-row"><td class="tri-ay">Selected LDF</td>${selRow}<td class="ldf-cell tail">1.000 (tail)</td></tr>
+          <tr class="ldf-row sel-row"><td class="tri-ay">Selected LDF</td>${selRow}<td class="ldf-cell tail"><input type="number" id="tail-factor-input" value="${State.tailFactor || 1.0}" step="0.001" style="width: 60px; text-align: center; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 4px;"> (tail)</td></tr>
         </tbody>
       </table>
     </div>
@@ -314,6 +543,11 @@ function setupLDFEditing() {
   document.querySelectorAll('.ldf-input').forEach(input => {
     input.addEventListener('change', () => { State.customLDFs[parseInt(input.dataset.idx)] = parseFloat(input.value); });
   });
+  const tailInput = document.getElementById('tail-factor-input');
+  if (tailInput) {
+    State.tailFactor = parseFloat(tailInput.value) || 1.0;
+    tailInput.addEventListener('change', () => { State.tailFactor = parseFloat(tailInput.value) || 1.0; });
+  }
 }
 
 window.changeLDFBase = function(base) {
@@ -324,16 +558,20 @@ window.changeLDFBase = function(base) {
 
 function proceedToModelSelection() {
   advanceStep(3);
-  // Show all available methods for user to choose
-  const ranked = [
-    { code: 'BF', label: 'Bornhuetter-Ferguson', desc: 'Uses a priori expected loss ratios.', score: 10, recommended: true, params: [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio', default: 0.65}] },
+  let ranked = [
+    { code: 'BF', label: 'Bornhuetter-Ferguson', desc: 'Uses a priori expected loss ratios.', score: 10, recommended: true, params: [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio (%)', default: 65}] },
     { code: 'CL', label: 'Chain Ladder (Basic)', desc: 'Standard development method.', score: 9, recommended: true, params: [] },
     { code: 'CC', label: 'Cape Cod', desc: 'Uses an overall loss ratio for stability.', score: 8, recommended: false, params: [{key: 'decay', label: 'Decay Factor', default: 1.0}] },
-    { code: 'BK', label: 'Benktander', desc: 'Iterative blend of BF and CL.', score: 7, recommended: false, params: [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio', default: 0.65}, {key: 'iterations', label: 'Iterations (c)', default: 1}] },
+    { code: 'BK', label: 'Benktander', desc: 'Iterative blend of BF and CL.', score: 7, recommended: false, params: [{key: 'aprioriLossRatio', label: 'A Priori Loss Ratio (%)', default: 65}, {key: 'iterations', label: 'Iterations (c)', default: 1}] },
     { code: 'MCL', label: 'Mack Chain Ladder', desc: 'Calculates standard errors and variance.', score: 6, recommended: false, params: [] },
     { code: 'CLK', label: 'Clark Stochastic', desc: 'Stochastic curve fitting approximation.', score: 5, recommended: false, params: [{key: 'curveType', label: 'Growth Curve', default: 'loglogistic'}] },
     { code: 'CO', label: 'Case Outstanding', desc: 'Uses only reported case reserves.', score: 4, recommended: false, params: [] }
   ];
+
+  if (State.triangle && !State.triangle.hasPremium) {
+    ranked = ranked.filter(m => !['BF', 'CC', 'BK'].includes(m.code));
+  }
+
   State.ranked = ranked;
   setRightPanel('model-select', { ranked });
 }
@@ -363,14 +601,31 @@ window.selectMethod = function(code) {
   else submitParams(code);
 };
 
+window.addRateChangeRow = function() {
+  const container = document.getElementById('rate-changes-container');
+  if(!container) return;
+  const row = document.createElement('div');
+  row.style = "display:flex; gap:8px; margin-bottom:8px;";
+  row.innerHTML = `
+    <input type="date" class="rc-date" style="flex:1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 8px; border-radius: 4px;">
+    <input type="number" class="rc-pct" placeholder="Change % (e.g. 5)" step="any" style="flex:1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: white; padding: 8px; border-radius: 4px;">
+    <button class="btn-ghost" onclick="this.parentElement.remove()" style="padding: 8px;">✕</button>
+  `;
+  container.appendChild(row);
+}
+
 function renderParamsView({ code, params }) {
   const fields = params.map(p => `<div class="param-field"><label>${p.label}</label><input type="number" id="param-${p.key}" class="param-input" data-key="${p.key}" value="${p.default}" step="any"></div>`).join('');
-  return `<div class="view-header"><h2>Parameters</h2></div><div class="params-container">${fields}<button class="btn-run" onclick="submitParams('${code}')">Execute Tool →</button></div>`;
+  
+  return `<div class="view-header"><h2>Parameters</h2></div><div class="params-container" style="display:flex; flex-direction:column; gap:16px;">${fields}<button class="btn-run" onclick="submitParams('${code}')">Execute Tool →</button></div>`;
 }
 
 window.submitParams = async function(code) {
   const params = {};
-  document.querySelectorAll('.param-input').forEach(i => params[i.dataset.key] = parseFloat(i.value));
+  document.querySelectorAll('.param-input').forEach(i => {
+    const v = parseFloat(i.value);
+    params[i.dataset.key] = isNaN(v) ? null : v;
+  });
 
   advanceStep(4);
   const msgId = addAgentMessage('agent', `⚙️ <strong>Execution Agent</strong> running ${code} on backend…`, 'analyzing');
@@ -383,7 +638,7 @@ window.submitParams = async function(code) {
         session_id: State.sessionId,
         method_code: code,
         params: params,
-        custom_ldfs: [...State.customLDFs, 1.0], // add tail
+        custom_ldfs: [...State.customLDFs, State.tailFactor || 1.0], // add custom tail
         api_key: State.apiKey,
         base_url: State.baseUrl,
         model_name: State.modelName
@@ -394,11 +649,81 @@ window.submitParams = async function(code) {
 
     setRightPanel('results', data);
     
+    setTimeout(() => {
+      if (data.ldfs && data.dev_ages) {
+        drawLDFChart(data.dev_ages, data.ldfs);
+      }
+    }, 100);
+    
     updateAgentMessage(msgId, 'Execution complete. Report displayed in right panel.');
   } catch (e) {
     updateAgentMessage(msgId, 'Execution failed: ' + e.message);
   }
 };
+
+let ldfChartInstance = null;
+function drawLDFChart(labels, ldfData) {
+  const ctx = document.getElementById('ldfChart');
+  if (!ctx) return;
+  
+  if (ldfChartInstance) {
+    ldfChartInstance.destroy();
+  }
+  
+  // Format labels: "12m", "24m", etc.
+  const chartLabels = labels.map(l => l + 'm');
+  
+  ldfChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: chartLabels,
+      datasets: [{
+        label: 'Loss Development Factor (LDF)',
+        data: ldfData,
+        borderColor: '#a78bfa',
+        backgroundColor: 'rgba(167, 139, 250, 0.2)',
+        borderWidth: 3,
+        pointBackgroundColor: '#111827',
+        pointBorderColor: '#a78bfa',
+        pointBorderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true,
+        tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(17, 24, 39, 0.9)',
+          titleColor: '#a78bfa',
+          bodyFont: { size: 14, weight: 'bold' },
+          padding: 12,
+          displayColors: false,
+          callbacks: {
+            label: function(context) {
+              return 'LDF: ' + context.parsed.y.toFixed(4);
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: false,
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          ticks: { color: 'rgba(255, 255, 255, 0.5)' }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: 'rgba(255, 255, 255, 0.5)' }
+        }
+      }
+    }
+  });
+}
 
 function renderResultsView(data) {
   // Extract all unique keys from results array to form dynamic columns
@@ -411,7 +736,15 @@ function renderResultsView(data) {
   const extraKeys = keys.filter(k => !coreKeys.includes(k));
   const finalKeys = [...coreKeys, ...extraKeys];
   
-  const headers = finalKeys.map(k => `<th>${k.charAt(0).toUpperCase() + k.slice(1)}</th>`).join('');
+  const headerMap = {
+    ay: 'Accident Year',
+    paid: 'Paid Claims',
+    cdfToUlt: 'CDF to Ultimate',
+    pctReported: '% Reported',
+    ultimate: 'Ultimate Claims',
+    ibnr: 'IBNR'
+  };
+  const headers = finalKeys.map(k => `<th>${headerMap[k] || (k.charAt(0).toUpperCase() + k.slice(1))}</th>`).join('');
   const rows = data.results.map(r => {
     return '<tr>' + finalKeys.map(k => {
       let val = r[k];
@@ -423,18 +756,121 @@ function renderResultsView(data) {
     }).join('') + '</tr>';
   }).join('');
   
+  let olfTableHtml = '';
+  if (data.olf_results && data.olf_results.length > 0) {
+    const olfRows = data.olf_results.map(r => `
+      <tr>
+        <td>${r.accident_year}</td>
+        <td>${fmt(r.earned_premium)}</td>
+        <td>${r.average_rate_level.toFixed(4)}</td>
+        <td>${r.olf.toFixed(4)}</td>
+        <td style="color:#10b981; font-weight:bold;">${fmt(r.on_level_premium)}</td>
+      </tr>
+    `).join('');
+    olfTableHtml = `
+      <h3 style="margin-top: 24px; margin-bottom: 12px; color: #a78bfa;">Premium On-Leveling Results</h3>
+      <div class="table-scroll" style="margin-bottom: 24px; border: 1px solid rgba(167, 139, 250, 0.3);">
+        <table class="results-table">
+          <thead>
+            <tr>
+              <th>Accident Year</th>
+              <th>Historical Premium</th>
+              <th>Avg Rate Level</th>
+              <th>On-Level Factor (OLF)</th>
+              <th>On-Level Premium</th>
+            </tr>
+          </thead>
+          <tbody>${olfRows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+  
   return `
     <div class="view-header"><h2>IBNR Results</h2><button class="btn-ghost" onclick="advanceStep(3); proceedToModelSelection();">← Back</button></div>
     <div class="kpi-strip">
       <div class="kpi-block"><div class="kpi-label">Total IBNR</div><div class="kpi-value">${fmt(data.totalIBNR)}</div></div>
       <div class="kpi-block"><div class="kpi-label">Total Ultimate</div><div class="kpi-value">${fmt(data.totalUlt)}</div></div>
     </div>
+    
+    ${olfTableHtml}
+    
     <div class="table-scroll" style="margin-bottom: 24px;">
       <table class="results-table">
         <thead><tr>${headers}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
+    
+    ${(function() {
+      if (!data.loss_ratios || data.loss_ratios.length === 0) return '';
+      const lrRows = data.loss_ratios.map(r => `
+        <tr>
+          <td>${r.accident_year}</td>
+          <td>${fmt(r.premium)}</td>
+          <td>${r.paid_lr_pct !== null ? r.paid_lr_pct.toFixed(1) + '%' : '—'}</td>
+          <td style="color:#10b981; font-weight:bold;">${r.ultimate_lr_pct !== null ? r.ultimate_lr_pct.toFixed(1) + '%' : '—'}</td>
+        </tr>
+      `).join('');
+      
+      const elrHtml = data.suggested_elr ? 
+        `<div style="margin-top:12px; font-size:13px; color:#a78bfa;"><strong>Cape Cod Suggested A Priori ELR:</strong> ${data.suggested_elr.toFixed(1)}%</div>` : '';
+
+      return `
+        <h3 style="margin-top: 24px; margin-bottom: 12px; color: #a78bfa;">Loss Ratios</h3>
+        <div class="table-scroll" style="margin-bottom: 24px; border: 1px solid rgba(167, 139, 250, 0.3);">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>Accident Year</th>
+                <th>Premium</th>
+                <th>Paid LR</th>
+                <th>Ultimate LR</th>
+              </tr>
+            </thead>
+            <tbody>${lrRows}</tbody>
+          </table>
+        </div>
+        ${elrHtml}
+      `;
+    })()}
+
+    ${(function() {
+      if (!data.ldf_stability || data.ldf_stability.length === 0) return '';
+      const stabRows = data.ldf_stability.map(r => {
+        const stabColor = r.stability === 'High' ? '#10b981' : (r.stability === 'Moderate' ? '#f59e0b' : '#ef4444');
+        return `
+          <tr>
+            <td>${r.from_age}-${r.to_age}</td>
+            <td>${r.n}</td>
+            <td>${r.vw !== null ? r.vw.toFixed(3) : '—'}</td>
+            <td>${r.cov_pct !== null ? r.cov_pct.toFixed(1) + '%' : '—'}</td>
+            <td><span style="color:${stabColor}; font-weight:bold;">${r.stability}</span></td>
+            <td>${r.credibility}</td>
+          </tr>
+        `;
+      }).join('');
+
+      return `
+        <h3 style="margin-top: 24px; margin-bottom: 12px; color: #a78bfa;">LDF Stability Diagnostics</h3>
+        <div class="table-scroll" style="margin-bottom: 24px; border: 1px solid rgba(167, 139, 250, 0.3);">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>Age-to-Age</th>
+                <th>Data Points (n)</th>
+                <th>Vol-Weighted LDF</th>
+                <th>Coef of Var (CoV)</th>
+                <th>Stability</th>
+                <th>Credibility</th>
+              </tr>
+            </thead>
+            <tbody>${stabRows}</tbody>
+          </table>
+        </div>
+      `;
+    })()}
+
     <h2 style="margin-bottom: 16px;">Execution Report</h2>
     <div id="report-container">
       ${(function() {
@@ -477,10 +913,63 @@ function renderResultsView(data) {
                   <span style="background: #3b82f6; color: white; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 10px;">2</span> MATHEMATICAL PROCESS
                 </div>
                 <div style="font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.9);">${rep.process}</div>
+                
+                <!-- NEW LDF VISUALIZATION -->
+                <div style="margin-top: 24px; padding: 16px; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                  <div style="font-size: 12px; color: #a78bfa; font-weight: 600; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 1px;">LDF Decay Curve Visualizer</div>
+                  <canvas id="ldfChart" style="max-height: 250px; width: 100%;"></canvas>
+                </div>
+                
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px dashed rgba(255,255,255,0.1); font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.5;">
+                  <strong style="color: #a78bfa; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; display: block; margin-bottom: 4px;">6-Criteria LDF Analysis</strong> 
+                  ${rep.ldf_analysis || 'No analysis available.'}
+                </div>
+
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px dashed rgba(255,255,255,0.1); font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.5;">
+                  <strong style="color: #a78bfa; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; display: block; margin-bottom: 4px;">Tail Factor Selection</strong> 
+                  ${rep.tail_factor_selection || 'No tail factor selection details provided.'}
+                </div>
+
                 <div style="margin-top: 16px; padding-top: 16px; border-top: 1px dashed rgba(255,255,255,0.1); font-size: 13px; color: rgba(255,255,255,0.7); line-height: 1.5;">
                   <strong style="color: #a78bfa; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; display: block; margin-bottom: 4px;">Impact of Exposures</strong> 
                   ${rep.impact}
                 </div>
+
+                ${(() => {
+                  const env = rep.environment_sensitivity;
+                  if (!env) return '';
+                  const impactColor = { 'SEVERE': '#f87171', 'MODERATE': '#fb923c', 'SLIGHT': '#facc15', 'NONE': '#4ade80' };
+                  const rows = [
+                    ['Changing Product Mix / Exposures', env.changing_product_mix],
+                    ['Increasing Claim Ratios', env.increasing_claim_ratios],
+                    ['Case Outstanding Strengthening', env.case_outstanding_strengthening],
+                    ['Changing Settlement Rates', env.changing_settlement_rates]
+                  ].map(([label, data]) => {
+                    if (!data) return '';
+                    const color = impactColor[data.impact] || '#94a3b8';
+                    return `<tr>
+                      <td style="padding:10px 12px; border-bottom:1px solid rgba(255,255,255,0.06); font-weight:600; color:rgba(255,255,255,0.85); width:28%;">${label}</td>
+                      <td style="padding:10px 12px; border-bottom:1px solid rgba(255,255,255,0.06); width:14%; text-align:center;">
+                        <span style="display:inline-block; padding:2px 10px; border-radius:20px; font-size:11px; font-weight:700; background:${color}22; color:${color}; border:1px solid ${color}44;">${data.impact}</span>
+                      </td>
+                      <td style="padding:10px 12px; border-bottom:1px solid rgba(255,255,255,0.06); color:rgba(255,255,255,0.65); font-size:12px; line-height:1.5;">${data.explanation}</td>
+                    </tr>`;
+                  }).join('');
+                  return `
+                  <div style="margin-top: 20px; padding-top: 16px; border-top: 1px dashed rgba(255,255,255,0.1);">
+                    <strong style="color: #f97316; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; display: block; margin-bottom: 12px;">⚠ Environmental Sensitivity Analysis</strong>
+                    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                      <thead>
+                        <tr style="background:rgba(255,255,255,0.04);">
+                          <th style="padding:8px 12px; text-align:left; color:rgba(255,255,255,0.5); font-size:10px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid rgba(255,255,255,0.1);">Environmental Factor</th>
+                          <th style="padding:8px 12px; text-align:center; color:rgba(255,255,255,0.5); font-size:10px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid rgba(255,255,255,0.1);">Impact</th>
+                          <th style="padding:8px 12px; text-align:left; color:rgba(255,255,255,0.5); font-size:10px; text-transform:uppercase; letter-spacing:1px; border-bottom:1px solid rgba(255,255,255,0.1);">Explanation</th>
+                        </tr>
+                      </thead>
+                      <tbody>${rows}</tbody>
+                    </table>
+                  </div>`;
+                })()}
               </div>
               
               <!-- Arrow Down -->

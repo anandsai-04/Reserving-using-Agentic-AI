@@ -1,10 +1,25 @@
 import pandas as pd
 import numpy as np
+from collections import defaultdict
 from io import StringIO
 import math
 
+def build_triangle(df, index_col, column_col, value_col, aggfunc="sum"):
+    """
+    Builds a triangle from a long-form DataFrame.
+    Returns the pure 2D pivot table.
+    """
+    return df.pivot_table(
+        index=index_col,
+        columns=column_col,
+        values=value_col,
+        aggfunc=aggfunc
+    )
+
 class Triangle:
-    def __init__(self):
+    def __init__(self, valuation_year=None):
+        self.valuation_year = valuation_year
+        self._raw_data = defaultdict(lambda: {'paid': None, 'incurred': None, 'count': None})
         self.accident_years = []
         self.dev_ages = []
         self.matrix = []
@@ -14,17 +29,35 @@ class Triangle:
         self.exposures = {}
         self.counts = {}
         self._format = None
-        self._raw_data = {}
         self.parse_log = []
 
     @classmethod
-    def from_csv(cls, csv_text: str):
-        t = cls()
-        df = pd.read_csv(StringIO(csv_text))
+    def from_csv(cls, csv_text: str, valuation_year=None):
+        t = cls(valuation_year=valuation_year)
         
-        # Lowercase headers and strip whitespace
-        df.columns = [str(c).strip().lower() for c in df.columns]
-        header = list(df.columns)
+        # First pass to check if there is a header
+        first_line = csv_text.strip().split('\n')[0]
+        # If the first line is mostly numbers (e.g. "2000, 100, 150, 200"), there is no header!
+        tokens = first_line.split(',')
+        numeric_count = 0
+        for token in tokens:
+            try:
+                float(token.strip().replace('$', ''))
+                numeric_count += 1
+            except:
+                pass
+                
+        has_header = True
+        if len(tokens) > 0 and numeric_count / len(tokens) > 0.5:
+            has_header = False
+            
+        if has_header:
+            df = pd.read_csv(StringIO(csv_text))
+            df.columns = [str(c).strip().lower() for c in df.columns]
+        else:
+            df = pd.read_csv(StringIO(csv_text), header=None)
+            
+        header = [str(c).strip().lower() for c in df.columns]
         
         t.parse_log.append(f"Columns found: {header}")
         
@@ -55,13 +88,11 @@ class Triangle:
         
     def _best_col(self, df, candidates):
         header = list(df.columns)
-        # Exact match
         for c in candidates:
             if c in header: return c
-        # Substring match
         for c in candidates:
             for h in header:
-                if c in h: return h
+                if c in str(h).lower(): return h
         return None
 
     def _parse_long(self, df):
@@ -76,69 +107,64 @@ class Triangle:
         if not ay_col or not dev_col:
             raise ValueError(f"Long format detected but could not find accident_year/dev_age columns.")
 
-        ay_set = set()
-        dev_set = set()
+        df[ay_col] = pd.to_numeric(df[ay_col], errors='coerce')
+        df[dev_col] = pd.to_numeric(df[dev_col], errors='coerce')
+        df = df.dropna(subset=[ay_col, dev_col])
+        df[ay_col] = df[ay_col].astype(int)
+        df[dev_col] = df[dev_col].astype(int)
+        df = df[(df[ay_col] >= 1900) & (df[ay_col] <= 2100)]
         
-        for _, row in df.iterrows():
-            ay = int(row[ay_col]) if pd.notna(row[ay_col]) else None
-            dev = int(row[dev_col]) if pd.notna(row[dev_col]) else None
-            if ay is None or dev is None or ay < 1900 or ay > 2100: continue
-            
-            ay_set.add(ay)
-            dev_set.add(dev)
-            
-            key = f"{ay}|{dev}"
-            if key not in self._raw_data:
-                self._raw_data[key] = {'paid': 0, 'incurred': 0, 'count': 0}
-                
-            paid_val = float(row[paid_col]) if paid_col and pd.notna(row[paid_col]) else 0
-            inc_val = float(row[inc_col]) if inc_col and pd.notna(row[inc_col]) else 0
-            cnt_val = float(row[cnt_col]) if cnt_col and pd.notna(row[cnt_col]) else 0
-            
-            # Since some values might be missing initially, we replace None with 0 above but we must handle if we want them to stay None if completely missing.
-            # To keep it simple, if we ever see a valid number, we add it.
-            if pd.notna(paid_val): self._raw_data[key]['paid'] = (self._raw_data[key].get('paid') or 0) + paid_val
-            if pd.notna(inc_val): self._raw_data[key]['incurred'] = (self._raw_data[key].get('incurred') or 0) + inc_val
-            if pd.notna(cnt_val): self._raw_data[key]['count'] = (self._raw_data[key].get('count') or 0) + cnt_val
-            
-            # To handle premium safely for multi-company datasets without multiplying it by the number of development periods,
-            # we should track it by company code if available. Otherwise, we assume it's single company.
-            comp_col = self._best_col(df, ['grcode', 'company', 'code', 'id', 'name'])
-            comp = row[comp_col] if comp_col and pd.notna(row[comp_col]) else 'default'
-            
-            if prem_col and pd.notna(row[prem_col]):
-                if not hasattr(self, '_comp_prems'): self._comp_prems = {}
-                key_prem = f"{comp}|{ay}"
-                self._comp_prems[key_prem] = float(row[prem_col])
-            if exp_col and pd.notna(row[exp_col]):
-                if not hasattr(self, '_comp_exps'): self._comp_exps = {}
-                key_exp = f"{comp}|{ay}"
-                self._comp_exps[key_exp] = float(row[exp_col])
-                
-        # Sum premiums across all companies for each AY
-        if hasattr(self, '_comp_prems'):
-            for k, val in self._comp_prems.items():
-                comp, ay = k.split('|')
-                self.premiums[int(ay)] = self.premiums.get(int(ay), 0) + val
-        if hasattr(self, '_comp_exps'):
-            for k, val in self._comp_exps.items():
-                comp, ay = k.split('|')
-                self.exposures[int(ay)] = self.exposures.get(int(ay), 0) + val
-                
-        self.accident_years = sorted(list(ay_set))
-        dev_ages = sorted(list(dev_set))
+        if self.valuation_year is not None:
+            df = df[df[ay_col] <= self.valuation_year]
         
-        # Normalize dev ages to months if they are just periods (1, 2, 3...)
+        self.accident_years = sorted(df[ay_col].unique().tolist())
+        dev_ages = sorted(df[dev_col].unique().tolist())
+        
         if dev_ages and max(dev_ages) <= 20:
-            dev_ages = [d * 12 for d in dev_ages]
-            remapped = {}
-            for k, v in self._raw_data.items():
-                ay, dev = k.split('|')
-                remapped[f"{ay}|{int(dev)*12}"] = v
-            self._raw_data = remapped
-            
+            df[dev_col] = df[dev_col] * 12
+            dev_ages = sorted(df[dev_col].unique().tolist())
         self.dev_ages = dev_ages
+        
+        # Apply early masking (truncation) before pivot
+        if self.valuation_year is not None:
+            df = df[df[ay_col] + (df[dev_col] / 12) - 1 <= self.valuation_year]
+        
+        # 1. PIVOT TABLE APPROACH (Using the user's explicit function)
+        def pivot_and_extract(value_col, agg="sum"):
+            if value_col and value_col in df.columns:
+                df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
+                
+                # Use the clean, global build_triangle function
+                pt = build_triangle(df, ay_col, dev_col, value_col, aggfunc=agg)
+                pt = pt.reindex(index=self.accident_years, columns=self.dev_ages)
+                
+                # "zoom down to only loss values" -> explicitly strip index and cols
+                matrix_values = pt.values.tolist()
+                return [[None if pd.isna(x) else float(x) for x in row] for row in matrix_values]
+            return [[None] * len(self.dev_ages) for _ in self.accident_years]
+
+        self.matrix = pivot_and_extract(paid_col)
+        self.incurred_matrix = pivot_and_extract(inc_col)
+        
+        count_matrix = pivot_and_extract(cnt_col)
+        for i, ay in enumerate(self.accident_years):
+            for v in reversed(count_matrix[i]):
+                if v is not None:
+                    self.counts[ay] = v
+                    break
+
+        if prem_col:
+            df[prem_col] = pd.to_numeric(df[prem_col], errors='coerce')
+            prem_series = df.groupby(ay_col)[prem_col].max()
+            self.premiums = prem_series.dropna().to_dict()
+            
+        if exp_col:
+            df[exp_col] = pd.to_numeric(df[exp_col], errors='coerce')
+            exp_series = df.groupby(ay_col)[exp_col].max()
+            self.exposures = exp_series.dropna().to_dict()
+
         self.data_type = 'paid' if paid_col else ('incurred' if inc_col else 'paid')
+        self._raw_data = None
         
     def _parse_wide(self, df):
         header = list(df.columns)
@@ -166,21 +192,24 @@ class Triangle:
         for _, row in df.iterrows():
             ay = int(row[ay_col]) if pd.notna(row[ay_col]) else None
             if ay is None or ay < 1900 or ay > 2100: continue
+            if self.valuation_year is not None and ay > self.valuation_year: continue
             ay_set.add(ay)
             
             for j, c in enumerate(dev_cols):
+                dev_age = self.dev_ages[j]
+                if self.valuation_year is not None and (ay + (dev_age / 12) - 1) > self.valuation_year:
+                    continue
                 val = float(row[c]) if pd.notna(row[c]) else None
-                self._raw_data[f"{ay}|{self.dev_ages[j]}"] = {'paid': val, 'incurred': None, 'count': None}
+                self._raw_data[f"{ay}|{dev_age}"] = {'paid': val, 'incurred': None, 'count': None}
                 
-            if prem_col and pd.notna(row[prem_col]):
-                self.premiums[ay] = float(row[prem_col])
-            if exp_col and pd.notna(row[exp_col]):
-                self.exposures[ay] = float(row[exp_col])
-                
+            if prem_col and pd.notna(row[prem_col]): self.premiums[ay] = float(row[prem_col])
+            if exp_col and pd.notna(row[exp_col]): self.exposures[ay] = float(row[exp_col])
+            
         self.accident_years = sorted(list(ay_set))
         self.data_type = 'paid'
 
     def _build_matrix(self):
+        if self._raw_data is None: return
         for ay in self.accident_years:
             row = []
             inc_row = []
@@ -206,6 +235,8 @@ class Triangle:
                     val = v
                     break
             diag.append(val)
+        return diag
+        
         return diag
         
     def compute_ldfs(self):

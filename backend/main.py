@@ -1,5 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import json
 from typing import Dict, Any, Optional
@@ -7,6 +8,14 @@ from typing import Dict, Any, Optional
 import agent_workflow
 
 app = FastAPI(title="Agentic Actuarial Reserving Backend")
+
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +30,7 @@ class ExecuteRequest(BaseModel):
     method_code: str
     params: Dict[str, Any]
     custom_ldfs: list
+    rate_changes: Optional[list] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model_name: Optional[str] = None
@@ -33,6 +43,13 @@ class ChatRequest(BaseModel):
     base_url: Optional[str] = None
     model_name: Optional[str] = None
 
+class ResumePipelineRequest(BaseModel):
+    session_id: str
+    conditions: Optional[Dict[str, bool]] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    model_name: Optional[str] = None
+
 from fastapi.responses import StreamingResponse
 
 @app.post("/api/upload")
@@ -41,18 +58,26 @@ async def upload_file(
     api_key: str = Form(None),
     base_url: str = Form(None),
     model_name: str = Form(None),
-    n_years: int = Form(5)
+    n_years: int = Form(5),
+    valuation_year: int = Form(None),
+    rate_changes_json: str = Form(None),
+    business_description: str = Form(None)
 ):
     content = await file.read()
     csv_text = content.decode('utf-8')
     
+    rate_changes = None
+    if rate_changes_json:
+        try:
+            rate_changes = json.loads(rate_changes_json)
+        except:
+            pass
+            
     try:
-        # Step 1: Create session
-        session_id = agent_workflow.create_session(csv_text, n_years, api_key, base_url, model_name)
+        session_id = agent_workflow.create_session(csv_text, n_years, valuation_year, api_key, base_url, model_name, business_description)
         
-        # Step 2: Execute Sequential Pipeline Generator
         return StreamingResponse(
-            agent_workflow.execute_sequential_pipeline(session_id),
+            agent_workflow.execute_sequential_pipeline_part1(session_id, rate_changes),
             media_type="text/event-stream"
         )
     except Exception as e:
@@ -60,84 +85,174 @@ async def upload_file(
         traceback.print_exc()
         return {"success": False, "error": str(e)}
 
+@app.post("/api/resume_pipeline")
+async def resume_pipeline(req: ResumePipelineRequest):
+    return StreamingResponse(
+        agent_workflow.execute_sequential_pipeline_part2(req.session_id, req.conditions),
+        media_type="text/event-stream"
+    )
+
 @app.post("/api/execute")
 async def execute_model(req: ExecuteRequest):
     try:
         session = agent_workflow.SESSION_STORE.get(req.session_id)
         if not session:
             return {"success": False, "error": "Invalid session_id"}
-            
+
         session['params'] = req.params
-        session['custom_ldfs'] = req.custom_ldfs # if we want to override ldfs
-        
-        # 1. Deterministically execute the model to get the exact data for the frontend
+        session['custom_ldfs'] = req.custom_ldfs
+
         from models.methods import METHODS
+        from models.tools import (get_environment_sensitivity, compute_ibnr_table,
+                                   compute_loss_ratios, suggest_elr,
+                                   compute_ldf_stability, compute_tail_factor)
+
         MethodClass = METHODS.get(req.method_code)
-        
-        # Check if the model requires premium and we don't have it
+        if not MethodClass:
+            return {"success": False, "error": "Invalid method code"}
+
         if MethodClass.needs_premium and not session['triangle'].premiums:
-            error_msg = f"Data Input Insufficient: The {MethodClass.label} model requires Premium data, which was not found in your dataset. Please choose a different model."
+            error_msg = (f"Data Input Insufficient: The {MethodClass.label} model requires "
+                         f"Premium data, which was not found in your dataset. Please choose a different model.")
             session['report'] = error_msg
-            return {
-                "success": True,
-                "results": [],
-                "totalIBNR": 0,
-                "totalUlt": 0,
-                "totalPaid": 0,
-                "narration": error_msg
-            }
-            
+            return {"success": True, "results": [], "totalIBNR": 0, "totalUlt": 0, "totalPaid": 0, "narration": error_msg}
+
+        import copy
+        t_eval = copy.deepcopy(session['triangle'])
+
+        # ── On-Level Premium (if rate changes provided) ───────────────────────
+        olf_note = ""
+        if req.rate_changes and t_eval.premiums:
+            try:
+                import pandas as pd
+                from models.on_level import OnLevelPremiumCalculator
+                prem_data = [{"accident_year": int(ay), "earned_premium": float(p)} for ay, p in t_eval.premiums.items()]
+                calc = OnLevelPremiumCalculator(pd.DataFrame(prem_data), pd.DataFrame(req.rate_changes))
+                on_level_df = calc.calculate()
+                t_eval.premiums = dict(zip(on_level_df["accident_year"], on_level_df["on_level_premium"]))
+                olf_note = "Premiums were adjusted to current rate levels using On-Level Factors (OLF) before projection."
+            except Exception as e:
+                return {"success": False, "error": f"On-Leveling error: {str(e)}"}
+
+        # ── TOOL: Tail Factor (deterministic) ─────────────────────────────────
+        tail_result = compute_tail_factor(req.custom_ldfs, t_eval)
+        chosen_tail   = tail_result["chosen"]
+        chosen_reason = tail_result["reason"]
+        if req.custom_ldfs[-1] == 1.0:
+            req.custom_ldfs[-1] = chosen_tail
+        else:
+            chosen_reason = f"User Manual Override ({req.custom_ldfs[-1]})"
+
+        # ── Run Model ─────────────────────────────────────────────────────────
         model = MethodClass()
-        model.fit(session['triangle'], req.params, req.custom_ldfs)
-        
-        diag = session['triangle'].get_latest_diagonal()
+        model.fit(t_eval, req.params, req.custom_ldfs)
+
+        diag       = t_eval.get_latest_diagonal()
         total_paid = sum(v for v in diag if v is not None)
-        
-        # 2. Agent 6: Execution Agent generates the detailed calculation report
+
+        # ── TOOL: IBNR Table (deterministic) ──────────────────────────────────
+        ibnr_table = compute_ibnr_table(t_eval, model, req.custom_ldfs)
+
+        # ── TOOL: Loss Ratios (deterministic, only if premium) ────────────────
+        loss_ratios = compute_loss_ratios(t_eval, ibnr_table) if t_eval.premiums else []
+
+        # ── TOOL: Suggested ELR (deterministic) ───────────────────────────────
+        elr_suggestion = suggest_elr(t_eval)
+
+        # ── TOOL: LDF Stability Diagnostics (deterministic) ───────────────────
+        ldf_stability  = compute_ldf_stability(t_eval)
+
+        # ── TOOL: Environment Sensitivity (deterministic lookup) ──────────────
+        env_sensitivity = get_environment_sensitivity(req.method_code)
+
+        # ── PROCESS descriptions (static strings — no LLM needed) ────────────
         PROCESS_EXPLANATIONS = {
-            "CL": "The Chain Ladder (CL) method is the most fundamental reserving technique. It operates under the assumption that historical loss development patterns will remain stable and repeat in the future. The process begins by calculating Age-to-Age factors (LDFs) from the historical cumulative paid triangle. These individual factors are then multiplied together to calculate Cumulative Development Factors (CDFs) to Ultimate. Finally, the most recent diagonal (the latest paid losses for each accident year) is multiplied by the corresponding CDF to project the Total Ultimate loss. IBNR is simply calculated by subtracting the paid losses from the Ultimate.",
-            "MCL": "The Mack Chain Ladder (MCL) method is a stochastic expansion of the basic Chain Ladder. While it calculates the exact same Ultimate and IBNR as the deterministic Chain Ladder, its true value lies in quantifying uncertainty. The process involves calculating the 'Sigma Squared' variance for every historical data point to measure volatility. It then applies this variance mathematically across the projected ultimate losses to calculate standard errors. This allows the model to output confidence intervals (such as the 75th and 95th percentiles), providing a statistical range of where the true IBNR is likely to fall.",
-            "BF": "The Bornhuetter-Ferguson (BF) method is designed to stabilize reserve estimates for highly immature accident years where pure Chain Ladder estimates would be extremely volatile. Instead of relying solely on paid losses multiplied by huge development factors, the BF method calculates an 'Expected Ultimate' by multiplying the total Premium volume by a user-supplied A Priori Expected Loss Ratio (ELR). The process then calculates the percentage of claims that are mathematically 'unreported' (1.0 - 1.0/CDF). The IBNR is established by multiplying the Expected Ultimate by this unreported percentage. This grounds the estimate in a logical expectation rather than pure historical extrapolation.",
-            "CC": "The Cape Cod (Stanard-Bühlmann) method is an enhancement of the Bornhuetter-Ferguson method. In the BF method, the actuary must manually guess the 'A Priori' Expected Loss Ratio (ELR) for each year. Cape Cod eliminates this guesswork by mathematically deriving a single, perfectly volume-weighted 'Overall ELR' from the entire historical dataset. It calculates the 'Used Premium' and 'Used Ultimate' across all years to find the true historical average loss ratio. Once this Overall ELR is calculated, it applies the exact same methodology as the BF method to calculate the final IBNR.",
-            "BK": "The Benktander (BK) method is an iterative, credibility-weighted compromise between the Chain Ladder and Bornhuetter-Ferguson methods. It is mathematically designed to be more responsive than BF but more stable than Chain Ladder. The process begins by calculating an initial Bornhuetter-Ferguson Ultimate. It then feeds that BF Ultimate back into the equation as the new 'A Priori' expected target, and recalculates the IBNR. This iterative loop is repeated based on the 'Iterations (c)' parameter. The mathematical result is a perfectly weighted blend: it heavily trusts the BF method for very 'young' immature years, while shifting weight towards the Chain Ladder method for older, mature years.",
-            "CO": "The Case Outstanding (CO) method is the most simplistic deterministic reserving approach. It completely ignores historical development patterns, CDFs, and any projection of future 'Incurred But Not Reported' (IBNR) claims. The process simply looks at the total 'Incurred Losses' (which is the sum of Paid Losses plus manually estimated Case Reserves currently sitting in the adjuster's file) and subtracts the Paid Losses. The resulting reserve is strictly equal to the known Case Reserves, assuming zero future development or newly reported claims.",
-            "CLK": "The Clark Stochastic model (CLK) departs from discrete Age-to-Age jumps and instead fits a continuous mathematical growth curve (such as Log-Logistic or Weibull) to the loss data. This process is particularly useful for smoothing out volatile data or for very long-tail lines of business. By fitting a continuous curve to the cumulative development, the model calculates highly stabilized continuous CDFs, which are then applied to the current paid losses to project the Ultimate. This continuous smoothing drastically reduces the impact of single-year anomalies in the historical triangle."
+            "CL":  "Chain Ladder projects ultimate claims by multiplying the latest paid diagonal by Cumulative Development Factors (CDFs) derived from historical age-to-age LDFs. IBNR = Ultimate − Paid.",
+            "MCL": "Mack Chain Ladder calculates identical ultimates to CL but additionally computes sigma-squared variance for each column, producing standard errors and confidence intervals (75th/95th percentile) around the IBNR estimate.",
+            "BF":  "Bornhuetter-Ferguson splits the IBNR into (a) expected unreported claims = Expected Ultimate × (1 − 1/CDF), plus (b) actual paid to date. Expected Ultimate = Premium × A Priori ELR.",
+            "CC":  "Cape Cod derives the ELR automatically from actual data: ELR = Σ(Reported Claims) / Σ(Used-Up Premium). Used-Up Premium = Earned Premium × % Reported (1/CDF). IBNR is then computed identically to BF.",
+            "BK":  "Benktander iteratively refines the BF estimate: BF Ultimate is fed back as the new A Priori, and IBNR is recomputed. Each iteration shifts credibility from BF toward Chain Ladder proportional to % reported.",
+            "CO":  "Case Outstanding method sets IBNR = total case reserves currently held by adjusters. It assumes zero future newly-reported claims. Reserve = Incurred − Paid = Case Reserves.",
+            "CLK": "Clark Stochastic fits a continuous growth curve (Log-Logistic or Weibull) to the paid triangle using maximum likelihood. Stabilised CDFs from the curve are applied to project ultimates with a distribution of outcomes."
         }
-        
-        sys_inst = """You are the Actuarial Execution Agent. You MUST return a pure JSON object (no markdown formatting, no code blocks) with EXACTLY the following keys:
-{
-  "inputs": "List the required inputs, e.g. Premium, CDFs, and specific parameters used.",
-  "process": "You MUST copy and paste the 'DETAILED_PROCESS_EXPLANATION' exactly word-for-word from the prompt into this field.",
-  "output_text": "A brief sentence summarizing the output.",
-  "output_numbers": {"Total IBNR": <number>, "Total Ultimate": <number>},
-  "impact": "Analyze how changing premium or exposure volume would impact the calculation based on this model."
-}
-Do not include anything else in your response. Only the JSON object.
-"""
-        
-        # Give the agent a sneak peek at the exact results so it can write a truthful report
+
+        # ── LEAN Agent Prompt (~100 tokens instead of ~500) ───────────────────
+        sys_inst = (
+            "You are the Actuarial Execution Agent. All numbers have been pre-computed by deterministic Python tools. "
+            "Return ONLY a pure JSON object with these keys: "
+            "inputs (1 sentence listing what data was used), "
+            "process (copy the PROCESS field word-for-word, append OLF note if provided), "
+            "output_text (1 sentence summary of total IBNR and Ultimate), "
+            "ldf_analysis (detailed 6-criteria LDF analysis referencing the stability data provided), "
+            "tail_factor_selection (explain the chosen tail factor method and value), "
+            "impact (2 sentences on how premium/exposure changes affect this model). "
+            "Do NOT calculate anything. Do NOT output environment_sensitivity — it is pre-computed. "
+            "Output only the JSON object, no markdown."
+        )
+
         sneak_peek = {
             "Method": req.method_code,
-            "Total IBNR": model.get_total_ibnr(),
-            "Total Ultimate": model.get_total_ultimate(),
-            "Parameters Used": req.params,
-            "Has Premium Data": bool(session['triangle'].premiums),
-            "DETAILED_PROCESS_EXPLANATION": PROCESS_EXPLANATIONS.get(req.method_code, "Standard actuarial process.")
+            "PROCESS": PROCESS_EXPLANATIONS.get(req.method_code, ""),
+            "OLF_NOTE": olf_note,
+            "Total_Paid": round(total_paid, 0),
+            "Total_IBNR": round(model.get_total_ibnr(), 0),
+            "Total_Ultimate": round(model.get_total_ultimate(), 0),
+            "Has_Premium": bool(session['triangle'].premiums),
+            "Selected_LDFs": req.custom_ldfs,
+            "Tail_Chosen": chosen_reason,
+            "LDF_Stability": ldf_stability,  # CoV, credibility per column — not full grid
         }
-        prompt = f"Please write the 4-part calculation report. Here are the exact mathematical outputs of the execution: {json.dumps(sneak_peek)}"
-        
+
+        prompt = f"Pre-computed data for your report: {json.dumps(sneak_peek)}"
         msg = agent_workflow.run_agent(req.api_key, req.base_url, req.model_name, sys_inst, prompt, [])
-        session['report'] = msg  # Save report for the parallel chat agent
-        
+
+        # Inject the pre-computed sensitivity back into the parsed report
+        try:
+            import re
+            parsed = json.loads(msg)
+        except Exception:
+            # If JSON parse fails, try stripping markdown fences
+            try:
+                clean = re.sub(r'^```[a-z]*\n?', '', msg.strip(), flags=re.MULTILINE)
+                clean = re.sub(r'```$', '', clean.strip())
+                parsed = json.loads(clean)
+            except Exception:
+                parsed = {"process": msg, "inputs": "", "output_text": "", "ldf_analysis": "", "tail_factor_selection": "", "impact": ""}
+
+        parsed["environment_sensitivity"] = env_sensitivity
+        parsed["output_numbers"] = {"Total IBNR": round(model.get_total_ibnr(), 0), "Total Ultimate": round(model.get_total_ultimate(), 0)}
+        parsed["loss_ratios"] = loss_ratios
+        parsed["suggested_elr"] = elr_suggestion
+
+        final_msg = json.dumps(parsed)
+        session['report'] = final_msg
+
+        # ── Store results ─────────────────────────────────────────────────────
+        cdfs_curve = t_eval.compute_cdfs(req.custom_ldfs)
+        session['results']   = model.get_results()
+        session['cdfs']      = cdfs_curve
+        session['ldfs']      = req.custom_ldfs
+        session['dev_ages']  = t_eval.dev_ages
+        session['totalIBNR'] = model.get_total_ibnr()
+        session['totalUlt']  = model.get_total_ultimate()
+
         return {
-            "success": True,
-            "results": model.get_results(),
-            "totalIBNR": model.get_total_ibnr(),
-            "totalUlt": model.get_total_ultimate(),
+            "success":   True,
+            "results":   session['results'],
+            "totalIBNR": session['totalIBNR'],
+            "totalUlt":  model.get_total_ultimate(),
             "totalPaid": total_paid,
-            "narration": msg
+            "narration": final_msg,
+            "cdfs":      cdfs_curve,
+            "ldfs":      req.custom_ldfs,
+            "dev_ages":  t_eval.dev_ages,
+            "loss_ratios":   loss_ratios,
+            "suggested_elr": elr_suggestion,
+            "ldf_stability": ldf_stability
         }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"success": False, "error": str(e)}
 
 @app.post("/api/chat")
