@@ -192,7 +192,7 @@ function renderUploadView() {
             <option value="Short-tail">Short-tail (e.g. Auto Phys Dam, Property)</option>
             <option value="Long-tail">Long-tail (e.g. Workers Comp, Liability)</option>
           </select>
-          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;">Dictates settlement speed. Short-tail claims close quickly (Property), while Long-tail claims (Liability) take years, impacting model selection.</div>
+          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;"><b>Line of Business (Tail Length):</b> Dictates settlement speed. Short-tail claims close quickly within a year or two (e.g., Property), while Long-tail claims take many years to fully settle (e.g., Liability, Workers Comp), heavily impacting model choice.</div>
         </div>
         <div>
           <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Data Volatility</label>
@@ -201,7 +201,7 @@ function renderUploadView() {
             <option value="Stable">Stable & Credible</option>
             <option value="Volatile">Thin or Volatile</option>
           </select>
-          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;">High volume data is stable for purely development-based methods. Sparse or highly volatile data may require stability-blended approaches.</div>
+          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;"><b>Credibility (Data Volatility):</b> High volume data is mathematically "credible" and stable for purely development-based methods like Chain Ladder. Sparse or highly volatile data lacks credibility and requires expected-loss blended approaches like BF.</div>
         </div>
         <div>
           <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Environment</label>
@@ -210,7 +210,7 @@ function renderUploadView() {
             <option value="Stable">Stable (No major changes)</option>
             <option value="Changing">Changing (New ops, reforms)</option>
           </select>
-          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;">Changes in claims handling, case reserve adequacy, or new tort reforms can severely distort historical patterns used in basic models.</div>
+          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;"><b>Environment:</b> Changes in claims handling speeds, case reserve adequacy, or new legal/tort reforms can severely distort historical patterns, making purely historical models inaccurate without adjustments.</div>
         </div>
         <div>
           <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Distortions</label>
@@ -219,7 +219,7 @@ function renderUploadView() {
             <option value="None">None (Smooth progression)</option>
             <option value="Present">Present (Large CAT/sporadic claims)</option>
           </select>
-          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;">Large catastrophic events or isolated massive claims skew historical loss development ratios unless correctly mitigated by specific models.</div>
+          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;"><b>Distortions:</b> Large catastrophic events or isolated massive sporadic claims skew historical loss development ratios. If present, specific actuarial techniques or alternative models must be used to smooth the progression.</div>
         </div>
       </div>
     </div>

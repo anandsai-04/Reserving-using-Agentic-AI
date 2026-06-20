@@ -276,7 +276,7 @@ def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None
         "session_id": session_id
     }) + "\n"
 
-def compute_recommender_matrix(business_context: str, has_premium: bool) -> tuple[str, str]:
+def compute_recommender_matrix(business_context: str, has_premium: bool, n_years: int = None) -> tuple[str, str]:
     import json
     scores = {
         "Chain Ladder (Development Method) [Code: CL / MCL]": 0,
@@ -321,6 +321,13 @@ def compute_recommender_matrix(business_context: str, has_premium: bool) -> tupl
     elif distort == "None":
         scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 1
 
+    if n_years is not None:
+        if n_years >= 7:
+            scores["Chain Ladder (Development Method) [Code: CL / MCL]"] += 2
+        elif n_years < 7:
+            for m in ["Bornhuetter-Ferguson (BF) [Code: BF]", "Cape Cod (Stanard-Buhlmann) [Code: CC]", "Benktander [Code: BK]"]: scores[m] += 2
+            scores["Chain Ladder (Development Method) [Code: CL / MCL]"] -= 2
+
     if not has_premium:
         scores["Bornhuetter-Ferguson (BF) [Code: BF]"] = -999
         scores["Cape Cod (Stanard-Buhlmann) [Code: CC]"] = -999
@@ -329,6 +336,7 @@ def compute_recommender_matrix(business_context: str, has_premium: bool) -> tupl
     best_model = max(scores, key=scores.get)
     
     reasons = []
+    if n_years is not None: reasons.append(f"the data has {n_years} historical years")
     if tail != "Not Known": reasons.append(f"the line is {tail}")
     if vol != "Not Known": reasons.append(f"the data is {vol}")
     if env != "Not Known": reasons.append(f"the environment is {env}")
@@ -354,8 +362,9 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
 
     has_premium = bool(session.get('triangle') and session['triangle'].premiums)
     business_context = session.get('business_context', '')
+    n_years = session.get('n_years')
     
-    best_model, matrix_reason = compute_recommender_matrix(business_context, has_premium)
+    best_model, matrix_reason = compute_recommender_matrix(business_context, has_premium, n_years)
     
     sys6 = f"""You are the Recommender Agent. The deterministic actuarial matrix has selected '{best_model}' as the most suitable method {matrix_reason}.
 Your task: Explain this recommendation to the user in exactly 1-2 crisp, human-readable sentences. Output ONLY the explanation."""
