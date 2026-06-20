@@ -261,26 +261,12 @@ def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None
     # 3. Run remaining tools for part 1
     t4 = calculate_ldfs(session_id)
     
-    # 4. Narratives
-    sys1 = "You are the Data Ingestion Agent. Output a concise 1-sentence narrative summarizing the parsing action."
-    sys2 = "You are the Data Quality Agent. Output a concise 1-sentence narrative summarizing the data quality report (missing values/duplicates)."
-    sys_pre = "You are the Preprocessing Agent. Summarize whether On-Level Premiums were successfully calculated or not based on the action result in 1 sentence."
-    sys3 = "You are the Triangle Builder Agent. Output a concise 1-sentence narrative summarizing the built triangle."
-    sys4 = "You are the LDF Calculator Agent. Output a concise 1-sentence narrative summarizing the calculated factors."
-    
-    tasks = [
-        ("Data Ingestion Agent", sys1, f"Action Result: {t1}"),
-        ("Data Quality Agent", sys2, f"Action Result: {t2}"),
-        ("Preprocessing Agent", sys_pre, preprocessing_text),
-        ("Triangle Builder Agent", sys3, f"Action Result: {t3}"),
-        ("LDF Calculator Agent", sys4, f"Action Result: {t4}")
-    ]
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(run_agent, api_key, base_url, model_name, t[1], t[2], []) for t in tasks]
-        for i, future in enumerate(futures):
-            result = future.result() 
-            yield emit(tasks[i][0], result)
+    # 4. Stream Deterministic Outputs via Parallel Agent
+    yield emit("Parallel Agent", f"Data Ingestion: {t1}")
+    yield emit("Parallel Agent", f"Data Quality: {t2}")
+    yield emit("Parallel Agent", preprocessing_text)
+    yield emit("Parallel Agent", f"Triangle Builder: {t3}")
+    yield emit("Parallel Agent", f"LDF Calculator: {t4}")
 
     # Pause for conditions input
     yield json.dumps({

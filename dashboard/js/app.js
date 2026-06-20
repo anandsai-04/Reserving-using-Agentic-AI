@@ -42,12 +42,59 @@ const STEPS = ['Ingestion Pipeline', 'Data Summary', 'Loss Triangle', 'Select Mo
 document.addEventListener('DOMContentLoaded', () => {
   setupDropzone();
   setupChat();
+  setupAPIKey();
   renderStepBar();
   setRightPanel('upload');
   addAgentMessage('system', 'Multi-Agent architecture active. Please start the Python server, then configure your parameters and upload a CSV file.');
 });
 
-// AI Settings handled universally on backend
+// ── API Key ───────────────────────────────────────────────────────
+function setupAPIKey() {
+  const btn = document.getElementById('api-key-btn');
+  const modal = document.getElementById('api-key-modal');
+  const inputUrl = document.getElementById('api-baseurl-input');
+  const inputModel = document.getElementById('api-model-input');
+  const inputKey = document.getElementById('api-key-input');
+  const save = document.getElementById('api-key-save');
+  const cancel = document.getElementById('api-key-cancel');
+  const ind = document.getElementById('api-key-indicator');
+
+  State.baseUrl = localStorage.getItem('ai_base_url') || '';
+  State.modelName = localStorage.getItem('ai_model_name') || '';
+  State.apiKey = localStorage.getItem('ai_api_key') || '';
+
+  if (State.apiKey) {
+    ind.classList.add('connected');
+    ind.title = 'AI API connected';
+  }
+
+  btn.addEventListener('click', () => { 
+    inputUrl.value = State.baseUrl;
+    inputModel.value = State.modelName;
+    inputKey.value = State.apiKey;
+    modal.classList.add('open'); 
+  });
+  
+  save.addEventListener('click', () => {
+    const key = inputKey.value.trim();
+    if (!key) { showToast('Please enter a valid API key.', 'error'); return; }
+    
+    State.baseUrl = inputUrl.value.trim();
+    State.modelName = inputModel.value.trim();
+    State.apiKey = key;
+    
+    localStorage.setItem('ai_base_url', State.baseUrl);
+    localStorage.setItem('ai_model_name', State.modelName);
+    localStorage.setItem('ai_api_key', key);
+    
+    ind.classList.add('connected');
+    modal.classList.remove('open');
+    showToast('AI Settings saved.', 'success');
+  });
+  
+  cancel.addEventListener('click', () => modal.classList.remove('open'));
+  modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
+}
 
 // ── UI Helpers ────────────────────────────────────────────────────
 function renderStepBar() {
@@ -306,7 +353,12 @@ async function processFile(file) {
     formData.append('business_description', bizDesc.value.trim());
   }
   
-  // API Settings are now handled exclusively on the backend via Render Environment Variables.
+  if (State.apiKey) {
+    formData.append('api_key', State.apiKey);
+    formData.append('base_url', State.baseUrl);
+    formData.append('model_name', State.modelName);
+  }
+
   try {
     const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
     if (!res.ok) throw new Error('Network response was not ok');
@@ -585,7 +637,10 @@ window.submitParams = async function(code) {
         session_id: State.sessionId,
         method_code: code,
         params: params,
-        custom_ldfs: [...State.customLDFs, State.tailFactor || 1.0]
+        custom_ldfs: [...State.customLDFs, State.tailFactor || 1.0], // add custom tail
+        api_key: State.apiKey,
+        base_url: State.baseUrl,
+        model_name: State.modelName
       })
     });
     const data = await res.json();

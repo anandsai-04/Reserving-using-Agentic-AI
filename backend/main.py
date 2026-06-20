@@ -178,7 +178,7 @@ async def execute_model(req: ExecuteRequest):
 
         # ── LEAN Agent Prompt (~100 tokens instead of ~500) ───────────────────
         sys_inst = (
-            "You are the Actuarial Execution Agent. All numbers have been pre-computed by deterministic Python tools. "
+            "You are the Analysis Agent. All numbers have been pre-computed by deterministic Python functions. "
             "Return ONLY a pure JSON object with these keys: "
             "inputs (1 sentence listing what data was used), "
             "process (copy the PROCESS field word-for-word, append OLF note if provided), "
