@@ -187,35 +187,39 @@ function renderUploadView() {
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
         <div>
           <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Line of Business</label>
-          <select id="ctx-tail" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px;">
+          <select id="ctx-tail" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px; margin-bottom: 4px;">
             <option value="Not Known">Not Known</option>
             <option value="Short-tail">Short-tail (e.g. Auto Phys Dam, Property)</option>
             <option value="Long-tail">Long-tail (e.g. Workers Comp, Liability)</option>
           </select>
+          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;">Dictates settlement speed. Short-tail claims close quickly (Property), while Long-tail claims (Liability) take years, impacting model selection.</div>
         </div>
         <div>
           <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Data Volatility</label>
-          <select id="ctx-volatility" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px;">
+          <select id="ctx-volatility" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px; margin-bottom: 4px;">
             <option value="Not Known">Not Known</option>
             <option value="Stable">Stable & Credible</option>
             <option value="Volatile">Thin or Volatile</option>
           </select>
+          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;">High volume data is stable for purely development-based methods. Sparse or highly volatile data may require stability-blended approaches.</div>
         </div>
         <div>
           <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Environment</label>
-          <select id="ctx-env" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px;">
+          <select id="ctx-env" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px; margin-bottom: 4px;">
             <option value="Not Known">Not Known</option>
             <option value="Stable">Stable (No major changes)</option>
             <option value="Changing">Changing (New ops, reforms)</option>
           </select>
+          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;">Changes in claims handling, case reserve adequacy, or new tort reforms can severely distort historical patterns used in basic models.</div>
         </div>
         <div>
           <label style="font-size: 11px; color: rgba(255,255,255,0.6); display: block; margin-bottom: 4px;">Distortions</label>
-          <select id="ctx-distort" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px;">
+          <select id="ctx-distort" style="width: 100%; background: rgba(0,0,0,0.3); border: 1px solid rgba(167,139,250,0.3); border-radius: 6px; color: white; padding: 8px; font-size: 12px; margin-bottom: 4px;">
             <option value="Not Known">Not Known</option>
             <option value="None">None (Smooth progression)</option>
             <option value="Present">Present (Large CAT/sporadic claims)</option>
           </select>
+          <div style="font-size: 10px; color: rgba(255,255,255,0.4); line-height: 1.3;">Large catastrophic events or isolated massive claims skew historical loss development ratios unless correctly mitigated by specific models.</div>
         </div>
       </div>
     </div>
