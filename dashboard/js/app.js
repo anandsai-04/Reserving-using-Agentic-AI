@@ -461,7 +461,10 @@ async function resumePipeline(conditions) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         session_id: State.sessionId,
-        conditions: conditions
+        conditions: conditions,
+        api_key: State.apiKey,
+        base_url: State.baseUrl,
+        model_name: State.modelName
       })
     });
     
@@ -1002,7 +1005,6 @@ function setupChat() {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
-    if (!State.apiKey) { showToast('API key required for chat.', 'error'); return; }
     if (!State.sessionId) { showToast('Upload data first to query the Parallel Agent.', 'error'); return; }
     
     addAgentMessage('user', escapeHTML(text));
