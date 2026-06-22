@@ -203,7 +203,8 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
                     {"role": "system", "content": sys_inst},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2
+                temperature=0.2,
+                timeout=15.0
             )
             return response.choices[0].message.content
         except openai.AuthenticationError:
@@ -239,6 +240,9 @@ def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None
     # 1. Run the initial parsing tools
     t1 = ingest_csv(session_id)
     t2 = perform_data_quality_checks(session_id)
+    
+    # Flush Cloudflare/Nginx buffer with 4KB of whitespace padding
+    yield json.dumps({"type": "padding", "data": " " * 4096}) + "\n"
     
     # 2. Process Rate Changes
     t3 = build_loss_triangle(session_id)
