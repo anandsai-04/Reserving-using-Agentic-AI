@@ -159,6 +159,8 @@ async def update_mappings(req: UpdateMappingsRequest):
         triangle = session.get('triangle')
         triangle_data = None
         if triangle:
+            from models.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
+            mature_info = compute_mature_accident_years(triangle)
             triangle_data = {
                 "accidentYears": triangle.accident_years,
                 "devAges": triangle.dev_ages,
@@ -166,7 +168,12 @@ async def update_mappings(req: UpdateMappingsRequest):
                 "incurred_matrix": triangle.incurred_matrix,
                 "ldfs": session.get('ldfs'),
                 "incurred_ldfs": session.get('incurred_ldfs'),
-                "hasPremium": bool(triangle.premiums)
+                "hasPremium": bool(triangle.premiums),
+                "suggested_elr_paid": compute_suggested_elr(triangle, "paid"),
+                "suggested_elr_incurred": compute_suggested_elr(triangle, "incurred"),
+                "suggested_mature_years": mature_info.get("mature_years", []),
+                "mature_reasoning": mature_info.get("reasoning", {}),
+                "method_availability": compute_method_availability(triangle)
             }
             
         return {

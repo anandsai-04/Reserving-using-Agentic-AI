@@ -182,6 +182,9 @@ def calculate_ldfs(session_id: str) -> str:
         ldfs = t.compute_ldfs()
         session['ldfs'] = ldfs
         
+        inc_ldfs = t.compute_incurred_ldfs()
+        session['incurred_ldfs'] = inc_ldfs
+        
         n = session.get('n_years', 5)
         # Assuming we just log the n-year request, exact usage in app.js uses the 'weighted5yr' or 'straightAvg' keys.
         # We will inform the agent it was calculated.
@@ -469,13 +472,21 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     triangle = updated_session.get('triangle')
     triangle_data = None
     if triangle:
+        from models.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
+        mature_info = compute_mature_accident_years(triangle)
         triangle_data = {
             "accidentYears": triangle.accident_years,
             "devAges": triangle.dev_ages,
             "matrix": triangle.matrix,
             "incurred_matrix": triangle.incurred_matrix,
             "ldfs": updated_session.get('ldfs'),
-            "hasPremium": bool(triangle.premiums)
+            "incurred_ldfs": updated_session.get('incurred_ldfs'),
+            "hasPremium": bool(triangle.premiums),
+            "suggested_elr_paid": compute_suggested_elr(triangle, "paid"),
+            "suggested_elr_incurred": compute_suggested_elr(triangle, "incurred"),
+            "suggested_mature_years": mature_info.get("mature_years", []),
+            "mature_reasoning": mature_info.get("reasoning", {}),
+            "method_availability": compute_method_availability(triangle)
         }
         
     yield json.dumps({
@@ -485,6 +496,74 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
         "triangle": triangle_data,
         "recommendation": recommender_text
     }) + "\n"
+
+def run_reserve_recommendation_agent(session_id: str, results_summary: list) -> dict:
+    """Invokes the Reserve Recommender Agent to recommend the best method based on comparative outcomes."""
+    session = SESSION_STORE.get(session_id)
+    if not session:
+        return {
+            "recommended_method": "None",
+            "confidence": "Low",
+            "reasoning": ["Session expired or not found."]
+        }
+        
+    api_key = session.get('api_key')
+    base_url = session.get('base_url')
+    model_name = session.get('model_name')
+    
+    summary_data = json.dumps(results_summary, indent=2)
+    
+    sys_inst = (
+        "You are an expert actuarial AI Reserving Recommender. You analyze loss reserving outputs "
+        "across multiple methods (Chain Ladder, Mack, BF, Benktander, Cape Cod, Case Outstanding, Clark) "
+        "and recommend the most appropriate method for the best estimate. "
+        "Provide your recommendation in strict JSON format containing three fields:\n"
+        "1. 'recommended_method': The code of the method (e.g. 'BK', 'BF', 'CL', 'MCL', 'CC')\n"
+        "2. 'confidence': The confidence level ('High', 'Medium', 'Low')\n"
+        "3. 'reasoning': An array of strings with key reasons for the recommendation. Do not exceed 4 reasons.\n"
+        "Respond ONLY with the raw JSON string. Do not include markdown code block formatting (like ```json)."
+    )
+    
+    prompt = (
+        f"Here are the calculated reserving indications for the current session:\n{summary_data}\n\n"
+        "Review these indications. Choose the best estimate method based on: stability of IBNR, "
+        "maturity score (immature years favor BF/BK, mature favor CL/Mack), volatility of Chain Ladder, "
+        "and Reserve-to-Case Ratio. Return the JSON recommendation."
+    )
+    
+    raw_response = run_agent(api_key, base_url, model_name, sys_inst, prompt, [])
+    
+    # Try parsing JSON
+    try:
+        cleaned = raw_response.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines)
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+        return json.loads(cleaned)
+    except Exception as e:
+        # Fallback heuristic recommendation if LLM fails
+        best_method = "CL"
+        for r in results_summary:
+            if r.get('status') == 'success' and r.get('code') in ['BK', 'BF', 'CC']:
+                best_method = r['code']
+                break
+        return {
+            "recommended_method": best_method,
+            "confidence": "Medium",
+            "reasoning": [
+                "Auto-fallback heuristic recommendation",
+                "Favored credibility method (BK/BF/CC) over raw Chain Ladder for stability.",
+                f"Parsing details: {str(e)}"
+            ]
+        }
+
 
 # ==========================================
 # PARALLEL CHAT AGENT

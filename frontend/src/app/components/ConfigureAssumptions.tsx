@@ -6,7 +6,8 @@ interface ConfigureAssumptionsProps {
   configs: ExecutionConfig;
   onChangeConfigs: (newConfigs: ExecutionConfig) => void;
   triangle: TriangleData;
-  suggestedElr: number | null;
+  suggestedElrPaid: number | null;
+  suggestedElrIncurred: number | null;
   suggestedMatureYears: number[];
   paidLdfBase: string;
   incurredLdfBase: string;
@@ -31,7 +32,8 @@ export default function ConfigureAssumptions({
   configs,
   onChangeConfigs,
   triangle,
-  suggestedElr,
+  suggestedElrPaid,
+  suggestedElrIncurred,
   suggestedMatureYears,
   paidLdfBase,
   incurredLdfBase,
@@ -169,13 +171,17 @@ export default function ConfigureAssumptions({
                             <input
                               type="number"
                               value={config.aprioriLossRatio !== undefined && config.aprioriLossRatio !== null ? config.aprioriLossRatio : ''}
-                              placeholder={suggestedElr ? `${suggestedElr}%` : '65'}
+                              placeholder={
+                                (config.source === 'incurred' ? suggestedElrIncurred : suggestedElrPaid)
+                                  ? `${config.source === 'incurred' ? suggestedElrIncurred : suggestedElrPaid}%`
+                                  : '65'
+                              }
                               onChange={(e) => handleParamChange(method.code, 'aprioriLossRatio', e.target.value === '' ? null : parseFloat(e.target.value))}
                               className="bg-bg-2 border border-border rounded px-3 py-1.5 text-xs outline-none focus:border-accent w-32"
                             />
-                            {suggestedElr && (
+                            {(config.source === 'incurred' ? suggestedElrIncurred : suggestedElrPaid) && (
                               <span className="text-[10px] font-semibold text-accent bg-accent/10 px-2 py-1 rounded">
-                                Suggested: {suggestedElr}%
+                                Suggested: {config.source === 'incurred' ? suggestedElrIncurred : suggestedElrPaid}%
                               </span>
                             )}
                           </div>

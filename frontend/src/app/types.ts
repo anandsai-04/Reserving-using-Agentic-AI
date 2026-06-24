@@ -59,6 +59,11 @@ export interface TriangleData {
   ldfs: LDFItem[];
   incurred_ldfs?: LDFItem[];
   hasPremium: boolean;
+  suggested_elr_paid?: number | null;
+  suggested_elr_incurred?: number | null;
+  suggested_mature_years?: number[];
+  mature_reasoning?: Record<number, string>;
+  method_availability?: Record<string, { available: boolean; reason: string | null }>;
 }
 
 export interface ModelParam {
@@ -93,7 +98,7 @@ export interface MethodResultItem {
   source: 'paid' | 'incurred';
   ultimate: number;
   ibnr: number;
-  status: 'success' | 'warning' | 'error' | 'disabled';
+  status: 'success' | 'warning' | 'error' | 'disabled' | 'failed' | 'incompatible';
   reason?: string | null;
   assumptions: {
     aprioriLossRatio?: number | null;

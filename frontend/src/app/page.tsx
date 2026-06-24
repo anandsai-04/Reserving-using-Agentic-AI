@@ -51,7 +51,8 @@ export default function Page() {
     CLK: { enabled: true, source: 'paid', curveType: 'weibull' },
     CO: { enabled: true, source: 'paid' }
   });
-  const [suggestedElr, setSuggestedElr] = useState<number | null>(65.0);
+  const [suggestedElrPaid, setSuggestedElrPaid] = useState<number | null>(65.0);
+  const [suggestedElrIncurred, setSuggestedElrIncurred] = useState<number | null>(65.0);
   const [suggestedMatureYears, setSuggestedMatureYears] = useState<number[]>([]);
 
   // Settings
@@ -79,6 +80,51 @@ export default function Page() {
       setApiKey(localStorage.getItem('ai_api_key') || '');
     }
   }, []);
+
+  // Synchronize suggestions and prefill configs when triangle changes
+  useEffect(() => {
+    if (triangle) {
+      const elrPaid = triangle.suggested_elr_paid !== undefined ? triangle.suggested_elr_paid : 65.0;
+      const elrInc = triangle.suggested_elr_incurred !== undefined ? triangle.suggested_elr_incurred : 65.0;
+      
+      setSuggestedElrPaid(elrPaid);
+      setSuggestedElrIncurred(elrInc);
+      setSuggestedMatureYears(triangle.suggested_mature_years || []);
+
+      setConfigs((prev) => {
+        const nextConfigs = { ...prev };
+        
+        const codes = Object.keys(nextConfigs);
+        for (const code of codes) {
+          const methodConfig = { ...(nextConfigs[code] || { enabled: true, source: 'paid' }) };
+          
+          if (triangle.method_availability && triangle.method_availability[code]) {
+            methodConfig.enabled = triangle.method_availability[code].available;
+          } else if (['BF', 'BK', 'CC', 'ELR'].includes(code)) {
+            methodConfig.enabled = triangle.hasPremium;
+          }
+
+          if (code === 'BF' || code === 'BK') {
+            const currentSource = methodConfig.source;
+            const appropriateElr = currentSource === 'incurred' ? elrInc : elrPaid;
+            methodConfig.aprioriLossRatio = methodConfig.aprioriLossRatio !== null && methodConfig.aprioriLossRatio !== undefined
+              ? methodConfig.aprioriLossRatio 
+              : appropriateElr;
+          }
+
+          if (code === 'ELR') {
+            methodConfig.matureYears = methodConfig.matureYears && methodConfig.matureYears.length > 0
+              ? methodConfig.matureYears
+              : (triangle.suggested_mature_years || []);
+          }
+
+          nextConfigs[code] = methodConfig;
+        }
+
+        return nextConfigs;
+      });
+    }
+  }, [triangle]);
 
   const saveSettings = (newBase: string, newModel: string, newKey: string) => {
     setBaseUrl(newBase);
@@ -535,7 +581,8 @@ export default function Page() {
             configs={configs}
             onChangeConfigs={setConfigs}
             triangle={triangle}
-            suggestedElr={suggestedElr}
+            suggestedElrPaid={suggestedElrPaid}
+            suggestedElrIncurred={suggestedElrIncurred}
             suggestedMatureYears={suggestedMatureYears}
             paidLdfBase={ldfBase}
             incurredLdfBase={incurredLdfBase}
