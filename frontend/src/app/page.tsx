@@ -96,7 +96,7 @@ export default function Page() {
         window.location.hostname === '127.0.0.1';
       const base = isLocal
         ? 'http://localhost:8000/api'
-        : 'https://reserving-using-agentic-ai.onrender.com/api';
+        : 'https://reserving-using-agentic-ai-iaq0.onrender.com';
       return `${base}/${endpoint}`;
     }
     return `/api/${endpoint}`;
@@ -456,9 +456,9 @@ export default function Page() {
         return <UploadZone onRunPipeline={handleRunPipeline} />;
       case 1:
         return summary ? (
-          <SummaryView 
-            summary={summary} 
-            onProceed={() => setStep(2)} 
+          <SummaryView
+            summary={summary}
+            onProceed={() => setStep(2)}
             onUpdateMappings={handleUpdateMappings}
           />
         ) : null;
@@ -568,9 +568,8 @@ export default function Page() {
             className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-2 border border-border rounded text-xs text-text-sub font-medium hover:border-border-2 hover:text-text-main transition-colors cursor-pointer"
           >
             <div
-              className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                apiKey ? 'bg-accent-green' : 'bg-text-muted'
-              }`}
+              className={`w-1.5 h-1.5 rounded-full transition-colors ${apiKey ? 'bg-accent-green' : 'bg-text-muted'
+                }`}
               title={apiKey ? 'AI API connected' : 'AI not connected'}
             />
             AI Settings

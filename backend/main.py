@@ -348,4 +348,8 @@ async def chat(req: ChatRequest):
 import os
 from fastapi.staticfiles import StaticFiles
 dashboard_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "out"))
-app.mount("/", StaticFiles(directory=dashboard_path, html=True), name="dashboard")
+if os.path.exists(dashboard_path):
+    app.mount("/", StaticFiles(directory=dashboard_path, html=True), name="dashboard")
+else:
+    print(f"Warning: Static dashboard directory '{dashboard_path}' not found. Skipping static file mount.")
+
