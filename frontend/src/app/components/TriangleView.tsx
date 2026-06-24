@@ -1,11 +1,12 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { TriangleData, SummaryData } from '../types';
-import { fmtShort } from '../utils';
+import { fmtShort, CurrencyCode } from '../utils';
 
 interface TriangleViewProps {
   triangle: TriangleData;
   summary: SummaryData;
+  currency?: CurrencyCode;
   ldfBase: string;
   onChangeLdfBase: (base: string) => void;
   customLDFs: number[];
@@ -19,6 +20,7 @@ interface TriangleViewProps {
 export default function TriangleView({
   triangle,
   summary,
+  currency = 'USD',
   ldfBase,
   onChangeLdfBase,
   customLDFs,
@@ -328,7 +330,7 @@ export default function TriangleView({
                         key={dev}
                         className={`tri-cell ${val === null ? 'empty text-text-muted bg-black/20' : ''}`}
                       >
-                        {val !== null ? fmtShort(val) : '—'}
+                        {val !== null ? fmtShort(val, currency) : '—'}
                       </td>
                     );
                   })}
@@ -402,7 +404,7 @@ export default function TriangleView({
                           key={dev}
                           className={`tri-cell ${val === null ? 'empty text-text-muted bg-black/20' : ''}`}
                         >
-                          {val !== null ? fmtShort(val) : '—'}
+                          {val !== null ? fmtShort(val, currency) : '—'}
                         </td>
                       );
                     })}

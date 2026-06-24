@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { ExecuteResult } from '../types';
-import { fmt } from '../utils';
+import { fmt, CurrencyCode } from '../utils';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -14,10 +14,11 @@ import {
 
 interface ResultsViewProps {
   data: ExecuteResult;
+  currency?: CurrencyCode;
   onBack: () => void;
 }
 
-export default function ResultsView({ data, onBack }: ResultsViewProps) {
+export default function ResultsView({ data, currency = 'USD', onBack }: ResultsViewProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export default function ResultsView({ data, onBack }: ResultsViewProps) {
         }
         return val;
       }
-      return fmt(val);
+      return fmt(val, currency);
     }
     return val != null ? val : '—';
   };
@@ -140,7 +141,7 @@ export default function ResultsView({ data, onBack }: ResultsViewProps) {
             Total IBNR
           </div>
           <div className="text-2xl font-bold font-mono text-text-main tracking-tight">
-            {fmt(data.totalIBNR)}
+            {fmt(data.totalIBNR, currency)}
           </div>
         </div>
         <div className="bg-bg-1 border border-border rounded-lg p-4.5">
@@ -148,7 +149,7 @@ export default function ResultsView({ data, onBack }: ResultsViewProps) {
             Total Ultimate
           </div>
           <div className="text-2xl font-bold font-mono text-text-main tracking-tight">
-            {fmt(data.totalUlt)}
+            {fmt(data.totalUlt, currency)}
           </div>
         </div>
       </div>
@@ -174,10 +175,10 @@ export default function ResultsView({ data, onBack }: ResultsViewProps) {
                 {data.olf_results.map((r, idx) => (
                   <tr key={idx}>
                     <td>{r.accident_year}</td>
-                    <td>{fmt(r.earned_premium)}</td>
+                    <td>{fmt(r.earned_premium, currency)}</td>
                     <td>{r.average_rate_level.toFixed(4)}</td>
                     <td>{r.olf.toFixed(4)}</td>
-                    <td className="text-accent-green font-bold">{fmt(r.on_level_premium)}</td>
+                    <td className="text-accent-green font-bold">{fmt(r.on_level_premium, currency)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -213,9 +214,9 @@ export default function ResultsView({ data, onBack }: ResultsViewProps) {
                 <tr className="totals-row">
                   <td>Total</td>
                   {finalKeys.slice(1).map((k, idx) => {
-                    if (k === 'paid') return <td key={idx}>{fmt(totalPaid)}</td>;
-                    if (k === 'ultimate') return <td key={idx}>{fmt(totalUlt)}</td>;
-                    if (k === 'ibnr') return <td key={idx}>{fmt(totalIBNR)}</td>;
+                    if (k === 'paid') return <td key={idx}>{fmt(totalPaid, currency)}</td>;
+                    if (k === 'ultimate') return <td key={idx}>{fmt(totalUlt, currency)}</td>;
+                    if (k === 'ibnr') return <td key={idx}>{fmt(totalIBNR, currency)}</td>;
                     return <td key={idx}>—</td>;
                   })}
                 </tr>
@@ -245,7 +246,7 @@ export default function ResultsView({ data, onBack }: ResultsViewProps) {
                 {data.loss_ratios.map((r, idx) => (
                   <tr key={idx}>
                     <td>{r.accident_year}</td>
-                    <td>{fmt(r.premium)}</td>
+                    <td>{fmt(r.premium, currency)}</td>
                     <td>{r.paid_lr_pct !== null ? `${r.paid_lr_pct.toFixed(1)}%` : '—'}</td>
                     <td className="text-accent-green font-bold">
                       {r.ultimate_lr_pct !== null ? `${r.ultimate_lr_pct.toFixed(1)}%` : '—'}
@@ -489,7 +490,7 @@ export default function ResultsView({ data, onBack }: ResultsViewProps) {
                         {k}
                       </span>
                       <span className="font-bold text-accent-green text-2xl font-mono">
-                        {fmt(v)}
+                        {fmt(v, currency)}
                       </span>
                     </div>
                   ))}

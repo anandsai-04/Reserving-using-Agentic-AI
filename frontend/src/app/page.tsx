@@ -17,6 +17,7 @@ import TriangleView from './components/TriangleView';
 import ModelSelector from './components/ModelSelector';
 import ParamsView from './components/ParamsView';
 import ResultsView from './components/ResultsView';
+import { CURRENCIES, CurrencyCode } from './utils';
 
 const STEPS = ['Ingestion Pipeline', 'Data Summary', 'Loss Triangle', 'Select Model', 'IBNR Results'];
 
@@ -33,6 +34,7 @@ export default function Page() {
   const [tailFactor, setTailFactor] = useState(1.0);
   const [ranked, setRanked] = useState<RankedModel[]>([]);
   const [executeResult, setExecuteResult] = useState<ExecuteResult | null>(null);
+  const [currency, setCurrency] = useState<CurrencyCode>('USD');
 
   // Settings
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -458,6 +460,7 @@ export default function Page() {
         return summary ? (
           <SummaryView 
             summary={summary} 
+            currency={currency}
             onProceed={() => setStep(2)} 
             onUpdateMappings={handleUpdateMappings}
           />
@@ -467,6 +470,7 @@ export default function Page() {
           <TriangleView
             triangle={triangle}
             summary={summary}
+            currency={currency}
             ldfBase={ldfBase}
             onChangeLdfBase={(base) => {
               setLdfBase(base);
@@ -515,6 +519,7 @@ export default function Page() {
         return executeResult ? (
           <ResultsView
             data={executeResult}
+            currency={currency}
             onBack={() => {
               setSelectedMethod(null);
               setStep(3);
@@ -563,6 +568,15 @@ export default function Page() {
         />
 
         <div className="flex items-center gap-2.5">
+          <select 
+            value={currency} 
+            onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
+            className="px-2 py-1.5 bg-bg-2 border border-border rounded text-xs text-text-sub font-medium hover:border-border-2 outline-none cursor-pointer"
+          >
+            {Object.entries(CURRENCIES).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-2 border border-border rounded text-xs text-text-sub font-medium hover:border-border-2 hover:text-text-main transition-colors cursor-pointer"
