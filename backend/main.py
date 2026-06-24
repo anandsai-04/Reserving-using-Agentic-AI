@@ -348,4 +348,5 @@ async def chat(req: ChatRequest):
 import os
 from fastapi.staticfiles import StaticFiles
 dashboard_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "out"))
+os.makedirs(dashboard_path, exist_ok=True)
 app.mount("/", StaticFiles(directory=dashboard_path, html=True), name="dashboard")
