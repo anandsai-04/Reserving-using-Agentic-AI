@@ -381,10 +381,12 @@ async def execute_all_models(req: ExecuteRequest):
         if not session: return {"success": False, "error": "Invalid session_id"}
         
         from models.methods import METHODS
-        from models.tools import compute_tail_factor, suggest_elr
+        from models.tools import compute_suggested_elr, compute_tail_factor
         import copy
         import concurrent.futures
         import numpy as np
+        import uuid
+        import datetime
 
         # Prepare base triangle copy
         t_eval_base = copy.deepcopy(session['triangle'])
@@ -411,66 +413,98 @@ async def execute_all_models(req: ExecuteRequest):
         if not incurred_ldfs_to_use and session.get('incurred_ldfs'):
             incurred_ldfs_to_use = session.get('incurred_ldfs')
 
-        # Define single method execution runner
-        def run_single_method(code, MethodClass):
+        # Define single method execution runner for a specific source
+        def run_method_for_source(code, MethodClass, source_val):
             try:
                 method_config = configs.get(code)
-                if not method_config or not method_config.enabled:
+                if not method_config:
                     return {
-                        "code": code,
-                        "name": MethodClass.label,
+                        "method": MethodClass.label,
+                        "source": source_val,
                         "status": "disabled",
-                        "error": "Method disabled by configuration"
+                        "reason": "Method not configured",
+                        "assumptions": {},
+                        "results": [],
+                        "error": None,
+                        "code": f"{code}_{source_val.upper()}",
+                        "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                        "ultimate": 0.0,
+                        "ibnr": 0.0
                     }
-
+                
+                # Check availability (premium-dependent methods)
                 if MethodClass.needs_premium and not t_eval_base.premiums:
                     return {
-                        "code": code,
-                        "name": MethodClass.label,
-                        "status": "incompatible",
-                        "error": "Method requires Premium data, which is missing."
+                        "method": MethodClass.label,
+                        "source": source_val,
+                        "status": "disabled",
+                        "reason": "Missing Earned Premium",
+                        "assumptions": {},
+                        "results": [],
+                        "error": "Method requires Premium data, which is missing.",
+                        "code": f"{code}_{source_val.upper()}",
+                        "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                        "ultimate": 0.0,
+                        "ibnr": 0.0
                     }
-                
+
                 model = MethodClass()
                 t_eval = copy.deepcopy(t_eval_base)
-                
-                # Determine data source for this method
-                source_val = method_config.source
+
+                # Determine explicit matrix and LDFs based on source
                 if source_val == "incurred":
-                    t_eval.matrix = t_eval.incurred_matrix
-                    t_eval.data_type = "incurred"
+                    matrix_to_use = t_eval_base.incurred_matrix
                     ldfs_for_run = copy.deepcopy(incurred_ldfs_to_use)
                     tail_to_use = req.incurred_tail_factor
+                    ldf_basis_name = "incurred"
                 else:
-                    t_eval.matrix = t_eval.matrix
-                    t_eval.data_type = "paid"
+                    matrix_to_use = t_eval_base.matrix
                     ldfs_for_run = copy.deepcopy(paid_ldfs_to_use)
                     tail_to_use = req.paid_tail_factor
+                    ldf_basis_name = "paid"
 
                 # Apply tail factor if last factor is 1.0 (or default tail factor)
-                if ldfs_for_run:
-                    if ldfs_for_run[-1] == 1.0:
-                        ldfs_for_run[-1] = tail_to_use
+                if ldfs_for_run and ldfs_for_run[-1] == 1.0:
+                    ldfs_for_run[-1] = tail_to_use
 
                 # Derive defaults or use config parameters
-                elr_suggestion = suggest_elr(t_eval)
-                suggested_elr_pct = (elr_suggestion * 100.0) if elr_suggestion is not None else 65.0
+                suggested_elr_pct = compute_suggested_elr(t_eval_base, source_val) or 65.0
                 
                 params = {}
+                assumptions = {
+                    "source": source_val,
+                    "ldf_basis": ldf_basis_name,
+                    "tail_factor": float(tail_to_use)
+                }
+
                 if code == 'BF':
-                    params['aprioriLossRatio'] = method_config.aprioriLossRatio if method_config.aprioriLossRatio is not None else suggested_elr_pct
+                    val = method_config.aprioriLossRatio if method_config.aprioriLossRatio is not None else suggested_elr_pct
+                    params['aprioriLossRatio'] = val
+                    assumptions['aprioriLossRatio'] = float(val) / 100.0
                 elif code == 'BK':
-                    params['aprioriLossRatio'] = method_config.aprioriLossRatio if method_config.aprioriLossRatio is not None else suggested_elr_pct
+                    val = method_config.aprioriLossRatio if method_config.aprioriLossRatio is not None else suggested_elr_pct
+                    params['aprioriLossRatio'] = val
                     params['iterations'] = method_config.iterations if method_config.iterations is not None else 2
+                    assumptions['aprioriLossRatio'] = float(val) / 100.0
+                    assumptions['iterations'] = int(params['iterations'])
                 elif code == 'CC':
                     params['decay'] = method_config.decay if method_config.decay is not None else 0.9
+                    assumptions['decay'] = float(params['decay'])
                 elif code == 'ELR':
-                    params['nMatureYears'] = len(method_config.matureYears) if method_config.matureYears else min(5, len(t_eval.accident_years))
+                    if method_config.matureYears:
+                        params['matureYears'] = method_config.matureYears
+                        assumptions['matureYears'] = method_config.matureYears
+                    else:
+                        params['nMatureYears'] = min(5, len(t_eval_base.accident_years))
+                        assumptions['nMatureYears'] = params['nMatureYears']
                     params['lrCap'] = 5.0
+                    assumptions['lrCap'] = 5.0
                 elif code == 'CLK':
                     params['curveType'] = method_config.curveType if method_config.curveType is not None else 'weibull'
-                    
-                model.fit(t_eval, params, ldfs_for_run)
+                    assumptions['curveType'] = params['curveType']
+
+                # FIT model using EXPLICIT matrix argument (zero triangle.matrix swap/mutation!)
+                model.fit(t_eval, params, ldfs_for_run, matrix=matrix_to_use)
                 
                 results = model.get_results()
                 total_ibnr = model.get_total_ibnr()
@@ -483,7 +517,7 @@ async def execute_all_models(req: ExecuteRequest):
                 
                 # 2. Maturity Score
                 cdfs = model.cdfs
-                dev_idx = [next((idx for idx, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in t_eval.matrix]
+                dev_idx = [next((idx for idx, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in matrix_to_use]
                 maturity_scores = []
                 for idx in dev_idx:
                     cdf = cdfs[idx] if idx < len(cdfs) else 1.0
@@ -509,37 +543,86 @@ async def execute_all_models(req: ExecuteRequest):
                     cv = getattr(model, 'volatility', 0.0) / total_ibnr
                 elif code == 'CLK' and hasattr(model, 'volatility') and total_ibnr > 0:
                     cv = getattr(model, 'volatility', 0.0) / total_ibnr
-                
+                    
                 return {
-                    "code": code,
-                    "name": MethodClass.label,
-                    "status": "success",
-                    "ibnr": float(total_ibnr),
+                    "method": MethodClass.label,
+                    "source": source_val,
                     "ultimate": float(total_ultimate),
+                    "ibnr": float(total_ibnr),
+                    "status": "success",
+                    "reason": None,
+                    "assumptions": assumptions,
+                    "results": results,
+                    "error": None,
+                    
+                    # Backward compatibility fields
+                    "code": f"{code}_{source_val.upper()}",
+                    "name": f"{MethodClass.label} ({source_val.capitalize()})",
                     "loss_ratio": float(loss_ratio),
                     "cv": float(cv),
                     "reserve_to_case_ratio": float(reserve_to_case_ratio),
-                    "maturity_score": float(maturity_score),
-                    "results": results,
-                    "error": None
+                    "maturity_score": float(maturity_score)
                 }
             except Exception as e:
                 return {
-                    "code": code,
-                    "name": MethodClass.label,
-                    "status": "failed",
-                    "error": str(e)
+                    "method": MethodClass.label,
+                    "source": source_val,
+                    "status": "error",
+                    "reason": str(e),
+                    "assumptions": {},
+                    "results": [],
+                    "error": str(e),
+                    "code": f"{code}_{source_val.upper()}",
+                    "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                    "ultimate": 0.0,
+                    "ibnr": 0.0
                 }
+
+        # Build execution tasks list
+        tasks_to_run = []
+        for code, MethodClass in METHODS.items():
+            method_config = configs.get(code)
+            if not method_config:
+                continue
+                
+            if not method_config.enabled:
+                tasks_to_run.append((code, MethodClass, "paid", True))
+                continue
+                
+            if method_config.source == "both":
+                tasks_to_run.append((code, MethodClass, "paid", False))
+                tasks_to_run.append((code, MethodClass, "incurred", False))
+            else:
+                tasks_to_run.append((code, MethodClass, method_config.source, False))
 
         # Run concurrent executions
         methods_out = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            futures = {executor.submit(run_single_method, code, MethodClass): code for code, MethodClass in METHODS.items()}
+            futures = {}
+            for code, MethodClass, source_val, is_disabled in tasks_to_run:
+                if is_disabled:
+                    methods_out.append({
+                        "method": MethodClass.label,
+                        "source": source_val,
+                        "status": "disabled",
+                        "reason": "Disabled by user",
+                        "assumptions": {},
+                        "results": [],
+                        "error": None,
+                        "code": f"{code}_{source_val.upper()}",
+                        "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                        "ultimate": 0.0,
+                        "ibnr": 0.0
+                    })
+                else:
+                    futures[executor.submit(run_method_for_source, code, MethodClass, source_val)] = (code, source_val)
+                    
             for future in concurrent.futures.as_completed(futures):
                 methods_out.append(future.result())
 
-        # Difference from Median Ultimate
-        successful_ultimates = [m["ultimate"] for m in methods_out if m["status"] == "success"]
+        # Difference from Median Ultimate (excluding unsuccessful / disabled runs)
+        successful_runs = [m for m in methods_out if m["status"] == "success"]
+        successful_ultimates = [m["ultimate"] for m in successful_runs]
         if successful_ultimates:
             median_ultimate = float(np.median(successful_ultimates))
             for m in methods_out:
@@ -578,7 +661,19 @@ async def execute_all_models(req: ExecuteRequest):
         rec_model = next((m for m in methods_out if m["code"] == rec_code and m["status"] == "success"), None)
         best_estimate_val = rec_model["ultimate"] if rec_model else (median_ultimate if median_ultimate > 0 else 0.0)
         
+        run_id = str(uuid.uuid4())
+        timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+        selected_methods = [code for code, cfg in configs.items() if cfg.enabled]
+
         session['results'] = {
+            "run_id": run_id,
+            "timestamp": timestamp,
+            "selected_methods": selected_methods,
+            "paid_ldfs": paid_ldfs_to_use,
+            "incurred_ldfs": incurred_ldfs_to_use,
+            "paid_tail_factor": req.paid_tail_factor,
+            "incurred_tail_factor": req.incurred_tail_factor,
+            "configs": {k: v.dict() for k, v in configs.items()},
             "best_estimate": best_estimate_val,
             "selected_method": rec_code,
             "ai_recommendation": ai_recommendation,
@@ -587,6 +682,14 @@ async def execute_all_models(req: ExecuteRequest):
         
         return {
             "success": True,
+            "run_id": run_id,
+            "timestamp": timestamp,
+            "selected_methods": selected_methods,
+            "paid_ldfs": paid_ldfs_to_use,
+            "incurred_ldfs": incurred_ldfs_to_use,
+            "paid_tail_factor": req.paid_tail_factor,
+            "incurred_tail_factor": req.incurred_tail_factor,
+            "configs": configs,
             "summary": {
                 "best_estimate": best_estimate_val,
                 "selected_method": rec_code

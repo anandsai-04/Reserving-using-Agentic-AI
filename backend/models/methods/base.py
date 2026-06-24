@@ -18,13 +18,15 @@ class MethodBase:
         self.params = {}
         self.ldfs = []
         self.cdfs = []
+        self.matrix = None
         
-    def fit(self, triangle, params, custom_ldfs):
+    def fit(self, triangle, params, custom_ldfs, matrix=None):
         self.triangle = triangle
         self.params = params
         self.ldfs = custom_ldfs
         self.cdfs = triangle.compute_cdfs(self.ldfs)
         self.results = []
+        self.matrix = matrix if matrix is not None else triangle.matrix
         self._compute()
         
     def _compute(self):
