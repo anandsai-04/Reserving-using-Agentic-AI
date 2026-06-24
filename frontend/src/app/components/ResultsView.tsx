@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { ExecuteResult } from '../types';
-import { fmt, CurrencyCode } from '../utils';
+import { fmt, fmtShort, CurrencyCode } from '../utils';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -543,7 +543,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
                     <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => fmtShort(v, currency)} />
                     <Tooltip
                       contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
-                      formatter={(v: number) => fmt(v, currency)}
+                      formatter={(v: any) => fmt(v, currency)}
                     />
                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
                     <Bar dataKey="paid" name="Paid Claims" stackId="a" fill="#10b981" radius={[0, 0, 4, 4]} />
@@ -572,7 +572,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
                     <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => `${v}%`} />
                     <Tooltip
                       contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
-                      formatter={(v: number) => `${v.toFixed(1)}%`}
+                      formatter={(v: any) => `${v.toFixed(1)}%`}
                     />
                     <Area type="monotone" dataKey="settlementRate" name="Settlement Rate" stroke="#10b981" strokeWidth={2.5} fill="url(#settlementGradient)" />
                   </AreaChart>
@@ -594,7 +594,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
                       <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => `${v}%`} />
                       <Tooltip
                         contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
-                        formatter={(v: number) => `${v.toFixed(1)}%`}
+                        formatter={(v: any) => `${v.toFixed(1)}%`}
                       />
                       <Legend iconType="circle" wrapperStyle={{ fontSize: '10px' }} />
                       <Line type="monotone" dataKey="paid_lr" name="Paid LR" stroke="#64748b" strokeWidth={2} dot={{ r: 3 }} />
@@ -618,7 +618,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
                     <YAxis stroke="rgba(255, 255, 255, 0.4)" fontSize={10} tickLine={false} tickFormatter={(v) => `${v}%`} />
                     <Tooltip
                       contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
-                      formatter={(v: number) => `${v.toFixed(1)}%`}
+                      formatter={(v: any) => `${v.toFixed(1)}%`}
                     />
                     <Line type="stepAfter" dataKey="pctReported" name="% Reported" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 4 }} />
                   </LineChart>
