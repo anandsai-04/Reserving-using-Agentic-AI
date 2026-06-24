@@ -1,9 +1,12 @@
 import sys
 import os
+from pathlib import Path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 import agent_workflow
 
-with open("../data/df_masked.csv", "r") as f:
+DATA_FILE = Path(__file__).resolve().parents[1] / "frontend" / "public" / "df_masked.csv"
+
+with DATA_FILE.open("r") as f:
     csv_text = f.read()
 
 session_id = agent_workflow.create_session(

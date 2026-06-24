@@ -1,8 +1,11 @@
 import json
 from models.triangle import Triangle
 import pandas as pd
+from pathlib import Path
 
-with open("../data/df_masked.csv", "r") as f:
+DATA_FILE = Path(__file__).resolve().parents[1] / "frontend" / "public" / "df_masked.csv"
+
+with DATA_FILE.open("r") as f:
     csv_text = f.read()
 
 t = Triangle.from_csv(csv_text)
