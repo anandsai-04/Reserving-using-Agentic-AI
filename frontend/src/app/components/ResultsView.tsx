@@ -49,7 +49,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
     } else {
       const firstSuccess = data.methods?.find(m => m.status === 'success');
       if (firstSuccess) {
-        setSelectedDetailCode(firstSuccess.code || firstSuccess.method || '');
+        setSelectedDetailCode(firstSuccess.result_id || firstSuccess.code || firstSuccess.method || '');
       }
     }
   }, [data]);
@@ -75,7 +75,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
   // Selected method detail
   const selectedMethodDetail = useMemo(() => {
     if (!data.methods) return undefined;
-    return data.methods.find(m => m.code === selectedDetailCode);
+    return data.methods.find(m => (m.result_id || m.code) === selectedDetailCode);
   }, [data.methods, selectedDetailCode]);
 
   // Prepare trend data for selected method
@@ -93,7 +93,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
 
   const barChartData = useMemo(() => {
     return activeMethods.map(m => ({
-      name: m.code,
+      name: m.result_id || m.code,
       IBNR: m.ibnr || 0,
       Ultimate: m.ultimate || 0
     }));
@@ -188,11 +188,11 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
             <tbody>
               {data.methods?.map((m, idx) => {
                 const isSuccess = m.status === 'success';
-                const isRecommended = m.code === data.ai_recommendation?.recommended_method;
+                const isRecommended = m.result_id === data.ai_recommendation?.recommended_method || m.code === data.ai_recommendation?.recommended_method;
                 
                 return (
                   <tr key={idx} className={`${isRecommended ? 'bg-accent-dim/15 border-l-2 border-accent font-medium' : ''}`}>
-                    <td className="font-bold text-accent font-mono">{m.code}</td>
+                    <td className="font-bold text-accent font-mono">{m.result_id || m.code}</td>
                     <td className="font-semibold text-text-main">{m.name}</td>
                     <td>
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
@@ -301,7 +301,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
             className="bg-bg-2 border border-border-2 rounded px-3 py-1.5 text-xs text-text-main font-semibold outline-none focus:border-accent h-9 cursor-pointer w-[240px]"
           >
             {activeMethods.map(m => (
-              <option key={m.code} value={m.code}>{m.code} - {m.name}</option>
+              <option key={m.result_id || m.code} value={m.result_id || m.code}>{(m.result_id || m.code)} - {m.name}</option>
             ))}
           </select>
         </div>

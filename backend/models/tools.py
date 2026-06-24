@@ -4,6 +4,8 @@ All calculations that should NOT be done by an LLM.
 These run in Python and return exact numbers to feed into agent prompts.
 """
 import numpy as np
+from typing import Optional, List
+
 
 
 # ── Environment Sensitivity Lookup (deterministic, per method) ─────────────
@@ -188,12 +190,11 @@ def compute_tail_factor(custom_ldfs: list, triangle=None) -> dict:
             "rtp_candidate": tail_rtp, "curve_candidate": tail_curve}
 
 
-def compute_suggested_elr(triangle, source: str = "paid") -> Optional[float]:
+def compute_suggested_elr(triangle, source: str = "paid", mature_cdf_threshold: float = 1.05) -> Optional[float]:
     """
-    Suggested ELR hierarchy:
-    1. Average mature accident year loss ratio (calculated using the selected source's losses)
-    2. Chain Ladder ultimate / premium (for the selected source)
-    3. Fallback: 65.0
+    Suggested ELR based on:
+    Sum(Ultimate_mature) / Sum(Premium_mature)
+    where Ultimate_mature = latest_loss * CDF of the selected source.
     """
     if not triangle.premiums:
         return None
@@ -211,23 +212,24 @@ def compute_suggested_elr(triangle, source: str = "paid") -> Optional[float]:
             diag = triangle.get_latest_diagonal()
             matrix_to_use = triangle.matrix
         
-        # 1. Try average mature accident year loss ratio
-        mature_lrs = []
+        # Calculate Sum(Ultimate_mature) / Sum(Premium_mature)
+        mature_ultimate_sum = 0.0
+        mature_premium_sum = 0.0
         for i, ay in enumerate(triangle.accident_years):
             row = matrix_to_use[i]
             dev_idx = next((j for j, v in reversed(list(enumerate(row))) if v is not None), 0)
             cdf = cdfs[dev_idx] if dev_idx < len(cdfs) else 1.0
-            dev_age = triangle.dev_ages[dev_idx] if dev_idx < len(triangle.dev_ages) else 0
-            if cdf < 1.05 or dev_age >= 84:
+            if cdf <= mature_cdf_threshold:
                 prem = triangle.premiums.get(ay, 0)
                 paid = diag[i]
                 if prem > 0 and paid is not None:
-                    mature_lrs.append((paid * cdf) / prem)
+                    mature_ultimate_sum += (paid * cdf)
+                    mature_premium_sum += prem
                     
-        if mature_lrs:
-            return round(float(sum(mature_lrs) / len(mature_lrs)) * 100, 2)
+        if mature_premium_sum > 0:
+            return round((mature_ultimate_sum / mature_premium_sum) * 100, 2)
             
-        # 2. Try Chain Ladder ultimate / premium
+        # 2. Try Chain Ladder ultimate / premium (all years)
         used_up = 0.0
         total_rep = 0.0
         for i, ay in enumerate(triangle.accident_years):
@@ -249,10 +251,10 @@ def compute_suggested_elr(triangle, source: str = "paid") -> Optional[float]:
     return 65.0
 
 
-def compute_mature_accident_years(triangle) -> dict:
+def compute_mature_accident_years(triangle, mature_cdf_threshold: float = 1.05) -> dict:
     """
     Flag mature years when:
-    CDF < 1.05 OR Development Age >= 84 months
+    CDF <= mature_cdf_threshold
     """
     mature_years = []
     reasons = {}
@@ -265,13 +267,10 @@ def compute_mature_accident_years(triangle) -> dict:
             row = triangle.matrix[i]
             dev_idx = next((j for j, v in reversed(list(enumerate(row))) if v is not None), 0)
             cdf = cdfs[dev_idx] if dev_idx < len(cdfs) else 1.0
-            dev_age = triangle.dev_ages[dev_idx] if dev_idx < len(triangle.dev_ages) else 0
             
             reasons_ay = []
-            if cdf < 1.05:
-                reasons_ay.append(f"CDF ({cdf:.3f}) < 1.05")
-            if dev_age >= 84:
-                reasons_ay.append(f"Development Age ({dev_age} mo) >= 84 mo")
+            if cdf <= mature_cdf_threshold:
+                reasons_ay.append(f"CDF ({cdf:.3f}) <= {mature_cdf_threshold}")
                 
             if reasons_ay:
                 mature_years.append(ay)

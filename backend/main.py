@@ -27,7 +27,9 @@ app.add_middleware(
 
 class MethodConfig(BaseModel):
     enabled: bool
-    source: Literal["paid", "incurred", "both"]
+    run_paid: Optional[bool] = True
+    run_incurred: Optional[bool] = True
+    source: Optional[Literal["paid", "incurred", "both"]] = None
     aprioriLossRatio: Optional[float] = None
     iterations: Optional[int] = None
     decay: Optional[float] = None
@@ -41,6 +43,7 @@ class ExecuteRequest(BaseModel):
     incurred_ldfs: Optional[List[float]] = None
     paid_tail_factor: Optional[float] = 1.0
     incurred_tail_factor: Optional[float] = 1.0
+    mature_cdf_threshold: Optional[float] = 1.05
     
     # Backward compatibility fields
     method_code: Optional[str] = None
@@ -73,6 +76,10 @@ class UpdateMappingsRequest(BaseModel):
     session_id: str
     reserving_roles: Dict[str, Optional[str]]
     selected_entities: Optional[list] = None
+
+class RecalculateSuggestionsRequest(BaseModel):
+    session_id: str
+    mature_cdf_threshold: float
 
 from fastapi.responses import StreamingResponse
 
@@ -396,12 +403,16 @@ async def execute_all_models(req: ExecuteRequest):
         if not configs:
             configs = {}
             for code, MethodClass in METHODS.items():
-                source_val = "paid"
-                if req.data_source == "incurred":
-                    source_val = "incurred"
+                run_p = True
+                run_i = True
+                if MethodClass.requires_paid_triangle and not MethodClass.requires_incurred_triangle:
+                    run_i = False
+                elif MethodClass.requires_incurred_triangle and not MethodClass.requires_paid_triangle:
+                    run_p = False
                 configs[code] = MethodConfig(
                     enabled=True,
-                    source=source_val
+                    run_paid=run_p,
+                    run_incurred=run_i
                 )
 
         paid_ldfs_to_use = req.paid_ldfs if req.paid_ldfs is not None else (req.custom_ldfs if req.custom_ldfs is not None else [])
@@ -413,21 +424,37 @@ async def execute_all_models(req: ExecuteRequest):
         if not incurred_ldfs_to_use and session.get('incurred_ldfs'):
             incurred_ldfs_to_use = session.get('incurred_ldfs')
 
+        # Precompute suggested ELRs once to avoid redundant execution in thread pool
+        mature_thresh = req.mature_cdf_threshold if req.mature_cdf_threshold is not None else 1.05
+        suggested_elr_paid = compute_suggested_elr(t_eval_base, "paid", mature_thresh) or 65.0
+        suggested_elr_incurred = compute_suggested_elr(t_eval_base, "incurred", mature_thresh) or 65.0
+
         # Define single method execution runner for a specific source
         def run_method_for_source(code, MethodClass, source_val):
             try:
+                # determine result_id, source_label, name_label
+                if source_val == "both":
+                    result_id = code
+                    source_label = "Paid + Incurred"
+                    name_label = MethodClass.label
+                else:
+                    result_id = f"{code}_{source_val.upper()}"
+                    source_label = source_val.capitalize()
+                    name_label = f"{MethodClass.label} ({source_label})"
+
                 method_config = configs.get(code)
                 if not method_config:
                     return {
+                        "result_id": result_id,
                         "method": MethodClass.label,
-                        "source": source_val,
+                        "source": source_label,
                         "status": "disabled",
                         "reason": "Method not configured",
                         "assumptions": {},
                         "results": [],
                         "error": None,
-                        "code": f"{code}_{source_val.upper()}",
-                        "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                        "code": result_id,
+                        "name": name_label,
                         "ultimate": 0.0,
                         "ibnr": 0.0
                     }
@@ -435,15 +462,16 @@ async def execute_all_models(req: ExecuteRequest):
                 # Check availability (premium-dependent methods)
                 if MethodClass.needs_premium and not t_eval_base.premiums:
                     return {
+                        "result_id": result_id,
                         "method": MethodClass.label,
-                        "source": source_val,
+                        "source": source_label,
                         "status": "disabled",
                         "reason": "Missing Earned Premium",
                         "assumptions": {},
                         "results": [],
                         "error": "Method requires Premium data, which is missing.",
-                        "code": f"{code}_{source_val.upper()}",
-                        "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                        "code": result_id,
+                        "name": name_label,
                         "ultimate": 0.0,
                         "ibnr": 0.0
                     }
@@ -457,22 +485,27 @@ async def execute_all_models(req: ExecuteRequest):
                     ldfs_for_run = copy.deepcopy(incurred_ldfs_to_use)
                     tail_to_use = req.incurred_tail_factor
                     ldf_basis_name = "incurred"
-                else:
+                elif source_val == "paid":
                     matrix_to_use = t_eval_base.matrix
                     ldfs_for_run = copy.deepcopy(paid_ldfs_to_use)
                     tail_to_use = req.paid_tail_factor
                     ldf_basis_name = "paid"
+                else: # both (requires both paid and incurred)
+                    matrix_to_use = t_eval_base.matrix
+                    ldfs_for_run = copy.deepcopy(paid_ldfs_to_use)
+                    tail_to_use = req.paid_tail_factor
+                    ldf_basis_name = "both"
 
                 # Apply tail factor if last factor is 1.0 (or default tail factor)
                 if ldfs_for_run and ldfs_for_run[-1] == 1.0:
                     ldfs_for_run[-1] = tail_to_use
 
                 # Derive defaults or use config parameters
-                suggested_elr_pct = compute_suggested_elr(t_eval_base, source_val) or 65.0
+                suggested_elr_pct = suggested_elr_incurred if source_val == "incurred" else suggested_elr_paid
                 
                 params = {}
                 assumptions = {
-                    "source": source_val,
+                    "source": source_label,
                     "ldf_basis": ldf_basis_name,
                     "tail_factor": float(tail_to_use)
                 }
@@ -495,8 +528,9 @@ async def execute_all_models(req: ExecuteRequest):
                         params['matureYears'] = method_config.matureYears
                         assumptions['matureYears'] = method_config.matureYears
                     else:
-                        params['nMatureYears'] = min(5, len(t_eval_base.accident_years))
-                        assumptions['nMatureYears'] = params['nMatureYears']
+                        m_info = compute_mature_accident_years(t_eval_base, mature_thresh)
+                        params['matureYears'] = m_info["mature_years"]
+                        assumptions['matureYears'] = m_info["mature_years"]
                     params['lrCap'] = 5.0
                     assumptions['lrCap'] = 5.0
                 elif code == 'CLK':
@@ -545,8 +579,9 @@ async def execute_all_models(req: ExecuteRequest):
                     cv = getattr(model, 'volatility', 0.0) / total_ibnr
                     
                 return {
+                    "result_id": result_id,
                     "method": MethodClass.label,
-                    "source": source_val,
+                    "source": source_label,
                     "ultimate": float(total_ultimate),
                     "ibnr": float(total_ibnr),
                     "status": "success",
@@ -556,24 +591,33 @@ async def execute_all_models(req: ExecuteRequest):
                     "error": None,
                     
                     # Backward compatibility fields
-                    "code": f"{code}_{source_val.upper()}",
-                    "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                    "code": result_id,
+                    "name": name_label,
                     "loss_ratio": float(loss_ratio),
                     "cv": float(cv),
                     "reserve_to_case_ratio": float(reserve_to_case_ratio),
                     "maturity_score": float(maturity_score)
                 }
             except Exception as e:
+                if source_val == "both":
+                    result_id = code
+                    source_label = "Paid + Incurred"
+                    name_label = MethodClass.label
+                else:
+                    result_id = f"{code}_{source_val.upper()}"
+                    source_label = source_val.capitalize()
+                    name_label = f"{MethodClass.label} ({source_label})"
                 return {
+                    "result_id": result_id,
                     "method": MethodClass.label,
-                    "source": source_val,
+                    "source": source_label,
                     "status": "error",
                     "reason": str(e),
                     "assumptions": {},
                     "results": [],
                     "error": str(e),
-                    "code": f"{code}_{source_val.upper()}",
-                    "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                    "code": result_id,
+                    "name": name_label,
                     "ultimate": 0.0,
                     "ibnr": 0.0
                 }
@@ -586,31 +630,52 @@ async def execute_all_models(req: ExecuteRequest):
                 continue
                 
             if not method_config.enabled:
-                tasks_to_run.append((code, MethodClass, "paid", True))
+                if MethodClass.supports_source_selection:
+                    if method_config.run_paid:
+                        tasks_to_run.append((code, MethodClass, "paid", True))
+                    if method_config.run_incurred:
+                        tasks_to_run.append((code, MethodClass, "incurred", True))
+                    if not method_config.run_paid and not method_config.run_incurred:
+                        tasks_to_run.append((code, MethodClass, "paid", True))
+                else:
+                    tasks_to_run.append((code, MethodClass, "both", True))
                 continue
                 
-            if method_config.source == "both":
-                tasks_to_run.append((code, MethodClass, "paid", False))
-                tasks_to_run.append((code, MethodClass, "incurred", False))
+            if MethodClass.supports_source_selection:
+                if method_config.run_paid:
+                    tasks_to_run.append((code, MethodClass, "paid", False))
+                if method_config.run_incurred:
+                    tasks_to_run.append((code, MethodClass, "incurred", False))
             else:
-                tasks_to_run.append((code, MethodClass, method_config.source, False))
+                tasks_to_run.append((code, MethodClass, "both", False))
 
         # Run concurrent executions
         methods_out = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             futures = {}
             for code, MethodClass, source_val, is_disabled in tasks_to_run:
+                # result_id and labeling for disabled runs
+                if source_val == "both":
+                    result_id = code
+                    source_label = "Paid + Incurred"
+                    name_label = MethodClass.label
+                else:
+                    result_id = f"{code}_{source_val.upper()}"
+                    source_label = source_val.capitalize()
+                    name_label = f"{MethodClass.label} ({source_label})"
+
                 if is_disabled:
                     methods_out.append({
+                        "result_id": result_id,
                         "method": MethodClass.label,
-                        "source": source_val,
+                        "source": source_label,
                         "status": "disabled",
                         "reason": "Disabled by user",
                         "assumptions": {},
                         "results": [],
                         "error": None,
-                        "code": f"{code}_{source_val.upper()}",
-                        "name": f"{MethodClass.label} ({source_val.capitalize()})",
+                        "code": result_id,
+                        "name": name_label,
                         "ultimate": 0.0,
                         "ibnr": 0.0
                     })
@@ -635,7 +700,7 @@ async def execute_all_models(req: ExecuteRequest):
             for m in methods_out:
                 m["diff_from_median"] = 0.0
 
-        methods_out.sort(key=lambda x: x["code"])
+        methods_out.sort(key=lambda x: x["result_id"])
 
         # Reserve Recommendation Agent
         results_summary_for_ai = [
@@ -700,6 +765,27 @@ async def execute_all_models(req: ExecuteRequest):
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/recalculate_suggestions")
+async def recalculate_suggestions(req: RecalculateSuggestionsRequest):
+    try:
+        session = agent_workflow.SESSION_STORE.get(req.session_id)
+        if not session:
+            return {"success": False, "error": "Session not found"}
+        triangle = session.get('triangle')
+        if not triangle:
+            return {"success": False, "error": "Triangle not found"}
+        from models.tools import compute_suggested_elr, compute_mature_accident_years
+        mature_info = compute_mature_accident_years(triangle, req.mature_cdf_threshold)
+        return {
+            "success": True,
+            "suggested_elr_paid": compute_suggested_elr(triangle, "paid", req.mature_cdf_threshold),
+            "suggested_elr_incurred": compute_suggested_elr(triangle, "incurred", req.mature_cdf_threshold),
+            "suggested_mature_years": mature_info.get("mature_years", []),
+            "mature_reasoning": mature_info.get("reasoning", {})
+        }
+    except Exception as e:
         return {"success": False, "error": str(e)}
 
 @app.get("/api/export/{session_id}")

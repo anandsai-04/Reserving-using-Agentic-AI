@@ -9,6 +9,8 @@ interface ConfigureAssumptionsProps {
   suggestedElrPaid: number | null;
   suggestedElrIncurred: number | null;
   suggestedMatureYears: number[];
+  matureCdfThreshold: number;
+  onChangeMatureCdfThreshold: (threshold: number) => void;
   paidLdfBase: string;
   incurredLdfBase: string;
   paidTailFactor: number;
@@ -35,6 +37,8 @@ export default function ConfigureAssumptions({
   suggestedElrPaid,
   suggestedElrIncurred,
   suggestedMatureYears,
+  matureCdfThreshold,
+  onChangeMatureCdfThreshold,
   paidLdfBase,
   incurredLdfBase,
   paidTailFactor,
@@ -44,23 +48,23 @@ export default function ConfigureAssumptions({
 }: ConfigureAssumptionsProps) {
 
   const handleToggleMethod = (code: string) => {
-    const current = configs[code] || { enabled: true, source: 'paid' };
+    const current = configs[code] || { enabled: true, runPaid: true, runIncurred: true };
     onChangeConfigs({
       ...configs,
       [code]: { ...current, enabled: !current.enabled },
     });
   };
 
-  const handleSourceChange = (code: string, source: 'paid' | 'incurred' | 'both') => {
-    const current = configs[code] || { enabled: true, source: 'paid' };
+  const handleToggleSource = (code: string, sourceField: 'runPaid' | 'runIncurred') => {
+    const current = configs[code] || { enabled: true, runPaid: true, runIncurred: true };
     onChangeConfigs({
       ...configs,
-      [code]: { ...current, source },
+      [code]: { ...current, [sourceField]: !current[sourceField] },
     });
   };
 
   const handleParamChange = (code: string, key: string, value: any) => {
-    const current = configs[code] || { enabled: true, source: 'paid' };
+    const current = configs[code] || { enabled: true, runPaid: true, runIncurred: true };
     onChangeConfigs({
       ...configs,
       [code]: { ...current, [key]: value },
@@ -68,7 +72,7 @@ export default function ConfigureAssumptions({
   };
 
   const handleMatureYearToggle = (code: string, year: number) => {
-    const current = configs[code] || { enabled: true, source: 'paid' };
+    const current = configs[code] || { enabled: true, runPaid: true, runIncurred: true };
     const currentYears = current.matureYears || [];
     const newYears = currentYears.includes(year)
       ? currentYears.filter((y) => y !== year)
@@ -143,19 +147,32 @@ export default function ConfigureAssumptions({
 
                   {config.enabled && !isDisabledByPremium && (
                     <div className="flex items-center gap-1.5 bg-bg-2 p-1 border border-border rounded-lg text-xs">
-                      {(['paid', 'incurred', 'both'] as const).map((src) => (
-                        <button
-                          key={src}
-                          onClick={() => handleSourceChange(method.code, src)}
-                          className={`px-2 py-1 rounded font-semibold capitalize transition-all cursor-pointer ${
-                            config.source === src
-                              ? 'bg-accent text-white shadow-sm'
-                              : 'text-text-sub hover:text-text-main'
-                          }`}
-                        >
-                          {src}
-                        </button>
-                      ))}
+                      {method.code === 'CO' ? (
+                        <span className="px-3 py-1 font-semibold text-text-sub uppercase tracking-wider text-[10px]">
+                          Requires Paid + Incurred
+                        </span>
+                      ) : (
+                        <>
+                          <label className="flex items-center gap-1.5 px-2 py-1 cursor-pointer font-semibold text-text-sub hover:text-text-main">
+                            <input
+                              type="checkbox"
+                              checked={!!config.runPaid}
+                              onChange={() => handleToggleSource(method.code, 'runPaid')}
+                              className="w-3.5 h-3.5 text-accent border-border-2 rounded focus:ring-accent accent-accent"
+                            />
+                            Paid
+                          </label>
+                          <label className="flex items-center gap-1.5 px-2 py-1 cursor-pointer font-semibold text-text-sub hover:text-text-main">
+                            <input
+                              type="checkbox"
+                              checked={!!config.runIncurred}
+                              onChange={() => handleToggleSource(method.code, 'runIncurred')}
+                              className="w-3.5 h-3.5 text-accent border-border-2 rounded focus:ring-accent accent-accent"
+                            />
+                            Incurred
+                          </label>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -167,21 +184,22 @@ export default function ConfigureAssumptions({
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="flex flex-col gap-1">
                           <label className="text-xs font-bold text-text-sub">A Priori Expected Loss Ratio (%)</label>
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
                             <input
                               type="number"
                               value={config.aprioriLossRatio !== undefined && config.aprioriLossRatio !== null ? config.aprioriLossRatio : ''}
-                              placeholder={
-                                (config.source === 'incurred' ? suggestedElrIncurred : suggestedElrPaid)
-                                  ? `${config.source === 'incurred' ? suggestedElrIncurred : suggestedElrPaid}%`
-                                  : '65'
-                              }
+                              placeholder="e.g. 65"
                               onChange={(e) => handleParamChange(method.code, 'aprioriLossRatio', e.target.value === '' ? null : parseFloat(e.target.value))}
                               className="bg-bg-2 border border-border rounded px-3 py-1.5 text-xs outline-none focus:border-accent w-32"
                             />
-                            {(config.source === 'incurred' ? suggestedElrIncurred : suggestedElrPaid) && (
+                            {suggestedElrPaid !== null && (
                               <span className="text-[10px] font-semibold text-accent bg-accent/10 px-2 py-1 rounded">
-                                Suggested: {config.source === 'incurred' ? suggestedElrIncurred : suggestedElrPaid}%
+                                Paid Suggestion: {suggestedElrPaid}%
+                              </span>
+                            )}
+                            {suggestedElrIncurred !== null && (
+                              <span className="text-[10px] font-semibold text-accent bg-accent/10 px-2 py-1 rounded">
+                                Incurred Suggestion: {suggestedElrIncurred}%
                               </span>
                             )}
                           </div>
@@ -221,32 +239,48 @@ export default function ConfigureAssumptions({
 
                     {/* Expected Loss Ratio settings */}
                     {method.code === 'ELR' && (
-                      <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-text-sub mb-1.5">Select Mature Accident Years</label>
-                        <div className="flex flex-wrap gap-2">
-                          {triangle.accidentYears.map((ay) => {
-                            const isSelected = (config.matureYears || []).includes(ay);
-                            const isSuggested = suggestedMatureYears.includes(ay);
-                            return (
-                              <button
-                                key={ay}
-                                onClick={() => handleMatureYearToggle(method.code, ay)}
-                                className={`px-3 py-1.5 rounded border text-xs font-medium cursor-pointer transition-all ${
-                                  isSelected
-                                    ? 'bg-accent/15 border-accent text-accent'
-                                    : isSuggested
-                                    ? 'border-dashed border-border-2 hover:border-accent font-bold'
-                                    : 'border-border hover:border-border-2 text-text-sub'
-                                }`}
-                              >
-                                {ay} {isSuggested && !isSelected && '⭐️'}
-                              </button>
-                            );
-                          })}
+                      <div className="flex flex-col gap-4">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-bold text-text-sub">Mature year selection threshold (CDF)</label>
+                          <select
+                            value={matureCdfThreshold}
+                            onChange={(e) => onChangeMatureCdfThreshold(parseFloat(e.target.value))}
+                            className="bg-bg-2 border border-border rounded px-3 py-1.5 text-xs outline-none focus:border-accent w-32 mt-1 cursor-pointer"
+                          >
+                            <option value={1.02}>1.02</option>
+                            <option value={1.05}>1.05</option>
+                            <option value={1.10}>1.10</option>
+                          </select>
                         </div>
-                        <span className="text-[10px] text-text-sub mt-2">
-                          ⭐️ Auto-detected mature years (CDF &lt; 1.05 or development age &ge; 84 months). Click to select.
-                        </span>
+
+                        <div className="flex flex-col gap-1">
+                          <label className="text-xs font-bold text-text-sub mb-1.5">Select Mature Accident Years</label>
+                          <div className="flex flex-wrap gap-2">
+                            {triangle.accidentYears.map((ay) => {
+                              const isSelected = (config.matureYears || []).includes(ay);
+                              const isSuggested = suggestedMatureYears.includes(ay);
+                              return (
+                                <button
+                                  key={ay}
+                                  type="button"
+                                  onClick={() => handleMatureYearToggle(method.code, ay)}
+                                  className={`px-3 py-1.5 rounded border text-xs font-medium cursor-pointer transition-all ${
+                                    isSelected
+                                      ? 'bg-accent/15 border-accent text-accent font-bold'
+                                      : isSuggested
+                                      ? 'border-dashed border-border-2 hover:border-accent font-bold text-text-main'
+                                      : 'border-border hover:border-border-2 text-text-sub'
+                                  }`}
+                                >
+                                  {ay} {isSuggested && !isSelected && '⭐️'}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <span className="text-[10px] text-text-sub mt-2">
+                            ⭐️ Auto-detected mature years (CDF &le; {matureCdfThreshold} or development age &ge; 84 months). Click to select.
+                          </span>
+                        </div>
                       </div>
                     )}
 

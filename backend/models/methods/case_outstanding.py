@@ -5,6 +5,9 @@ class CaseOutstanding(MethodBase):
     code = 'CO'
     label = 'Case Outstanding'
     needs_premium = False
+    requires_paid_triangle = True
+    requires_incurred_triangle = True
+    supports_source_selection = False
     
     def _compute(self):
         ays = self.triangle.accident_years

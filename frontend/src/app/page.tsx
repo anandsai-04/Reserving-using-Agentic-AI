@@ -42,18 +42,19 @@ export default function Page() {
   const [executeResult, setExecuteResult] = useState<ExecuteResult | null>(null);
   const [currency, setCurrency] = useState<CurrencyCode>('USD');
   const [configs, setConfigs] = useState<ExecutionConfig>({
-    CL: { enabled: true, source: 'paid' },
-    MCL: { enabled: true, source: 'paid' },
-    BF: { enabled: true, source: 'paid', aprioriLossRatio: null },
-    BK: { enabled: true, source: 'paid', aprioriLossRatio: null, iterations: 2 },
-    CC: { enabled: true, source: 'paid', decay: 0.9 },
-    ELR: { enabled: true, source: 'paid', matureYears: [] },
-    CLK: { enabled: true, source: 'paid', curveType: 'weibull' },
-    CO: { enabled: true, source: 'paid' }
+    CL: { enabled: true, runPaid: true, runIncurred: true },
+    MCL: { enabled: true, runPaid: true, runIncurred: true },
+    BF: { enabled: true, runPaid: true, runIncurred: false, aprioriLossRatio: null },
+    BK: { enabled: true, runPaid: true, runIncurred: false, aprioriLossRatio: null, iterations: 2 },
+    CC: { enabled: true, runPaid: true, runIncurred: false, decay: 0.9 },
+    ELR: { enabled: true, runPaid: true, runIncurred: false, matureYears: [] },
+    CLK: { enabled: true, runPaid: true, runIncurred: false, curveType: 'weibull' },
+    CO: { enabled: true, runPaid: true, runIncurred: true }
   });
   const [suggestedElrPaid, setSuggestedElrPaid] = useState<number | null>(65.0);
   const [suggestedElrIncurred, setSuggestedElrIncurred] = useState<number | null>(65.0);
   const [suggestedMatureYears, setSuggestedMatureYears] = useState<number[]>([]);
+  const [matureCdfThreshold, setMatureCdfThreshold] = useState<number>(1.05);
 
   // Settings
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -96,35 +97,70 @@ export default function Page() {
         
         const codes = Object.keys(nextConfigs);
         for (const code of codes) {
-          const methodConfig = { ...(nextConfigs[code] || { enabled: true, source: 'paid' }) };
+          const methodConfig = { ...(nextConfigs[code] || { enabled: true, runPaid: true, runIncurred: false }) };
           
           if (triangle.method_availability && triangle.method_availability[code]) {
             methodConfig.enabled = triangle.method_availability[code].available;
           } else if (['BF', 'BK', 'CC', 'ELR'].includes(code)) {
             methodConfig.enabled = triangle.hasPremium;
           }
-
+ 
           if (code === 'BF' || code === 'BK') {
-            const currentSource = methodConfig.source;
-            const appropriateElr = currentSource === 'incurred' ? elrInc : elrPaid;
+            const appropriateElr = methodConfig.runPaid ? elrPaid : elrInc;
             methodConfig.aprioriLossRatio = methodConfig.aprioriLossRatio !== null && methodConfig.aprioriLossRatio !== undefined
               ? methodConfig.aprioriLossRatio 
               : appropriateElr;
           }
-
+ 
           if (code === 'ELR') {
             methodConfig.matureYears = methodConfig.matureYears && methodConfig.matureYears.length > 0
               ? methodConfig.matureYears
               : (triangle.suggested_mature_years || []);
           }
-
+ 
           nextConfigs[code] = methodConfig;
         }
-
+ 
         return nextConfigs;
       });
     }
   }, [triangle]);
+
+  // Recalculate suggestions when mature CDF threshold changes
+  useEffect(() => {
+    if (sessionId && matureCdfThreshold) {
+      fetch(getApiUrl('recalculate_suggestions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          mature_cdf_threshold: matureCdfThreshold,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            setSuggestedElrPaid(data.suggested_elr_paid);
+            setSuggestedElrIncurred(data.suggested_elr_incurred);
+            setSuggestedMatureYears(data.suggested_mature_years);
+            setConfigs((prev) => {
+              const elrCfg = prev.ELR;
+              if (elrCfg) {
+                return {
+                  ...prev,
+                  ELR: {
+                    ...elrCfg,
+                    matureYears: data.suggested_mature_years,
+                  },
+                };
+              }
+              return prev;
+            });
+          }
+        })
+        .catch((err) => console.error('Failed to recalculate suggestions:', err));
+    }
+  }, [matureCdfThreshold, sessionId]);
 
   const saveSettings = (newBase: string, newModel: string, newKey: string) => {
     setBaseUrl(newBase);
@@ -400,6 +436,7 @@ export default function Page() {
       incurred_ldfs: [...incurredLdfsToUse, incurredTailFactor],
       paid_tail_factor: tailFactor,
       incurred_tail_factor: incurredTailFactor,
+      mature_cdf_threshold: matureCdfThreshold,
       api_key: apiKey,
       base_url: baseUrl,
       model_name: modelName,
@@ -584,6 +621,8 @@ export default function Page() {
             suggestedElrPaid={suggestedElrPaid}
             suggestedElrIncurred={suggestedElrIncurred}
             suggestedMatureYears={suggestedMatureYears}
+            matureCdfThreshold={matureCdfThreshold}
+            onChangeMatureCdfThreshold={setMatureCdfThreshold}
             paidLdfBase={ldfBase}
             incurredLdfBase={incurredLdfBase}
             paidTailFactor={tailFactor}

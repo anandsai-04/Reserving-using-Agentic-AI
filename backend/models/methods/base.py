@@ -5,6 +5,9 @@ class MethodBase:
     code = 'BASE'
     label = 'Base Method'
     needs_premium = False
+    requires_paid_triangle = False
+    requires_incurred_triangle = False
+    supports_source_selection = True
     
     @classmethod
     def get_required_params(cls):

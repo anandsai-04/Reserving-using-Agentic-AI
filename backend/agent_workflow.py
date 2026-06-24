@@ -249,6 +249,9 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     env_base_url = os.environ.get("LLM_BASE_URL")
     env_model_name = os.environ.get("LLM_MODEL_NAME")
 
+    # Determine if using default/fallback settings
+    is_default = (not api_key and not env_api_key) or (api_key == "ollama") or (base_url and "ngrok-free.dev" in base_url)
+
     # Fallbacks (UI > Environment > Hardcoded Defaults)
     api_key = api_key or env_api_key or "ollama"
     base_url = base_url or env_base_url or "https://encrypt-nail-smasher.ngrok-free.dev/v1"
@@ -267,8 +270,12 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     except Exception as e:
         return f"Agent Error: {str(e)}"
     
+    # Speed Optimization: Default/fallback settings should fail fast to avoid blocking actuarial workbench
+    timeout_val = 3.0 if is_default else 7.0
+    max_attempts = 1 if is_default else 2
+
     # Simple retry mechanism
-    for attempt in range(3):
+    for attempt in range(max_attempts):
         try:
             response = client.chat.completions.create(
                 model=model_name,
@@ -277,21 +284,22 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
-                timeout=15.0
+                timeout=timeout_val
             )
             return response.choices[0].message.content
         except openai.AuthenticationError:
             return "Agent Error: Authentication failed. Please verify your Render Environment Variables."
         except openai.RateLimitError:
-            if attempt == 2:
+            if attempt == max_attempts - 1:
                 return "Agent Error: Quota/Rate limit exceeded (429). Please wait 60 seconds and try again."
-            time.sleep(2)
+            time.sleep(1)
         except openai.APIConnectionError:
-            return "Agent Error: The LLM server is unreachable (API Connection Error)."
+            if attempt == max_attempts - 1:
+                return "Agent Error: The LLM server is unreachable (API Connection Error)."
         except Exception as e:
-            if attempt == 2:
+            if attempt == max_attempts - 1:
                 return f"Agent Error: {str(e)}"
-            time.sleep(2)
+            time.sleep(1)
     return "Error"
 
 # ==========================================

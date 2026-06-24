@@ -83,7 +83,9 @@ export interface RankedModel {
 
 export interface MethodConfig {
   enabled: boolean;
-  source: 'paid' | 'incurred' | 'both';
+  runPaid?: boolean;
+  runIncurred?: boolean;
+  source?: 'paid' | 'incurred' | 'both';
   aprioriLossRatio?: number | null;
   iterations?: number;
   decay?: number;
@@ -94,8 +96,9 @@ export interface MethodConfig {
 export type ExecutionConfig = Record<string, MethodConfig>;
 
 export interface MethodResultItem {
+  result_id: string;
   method: string;
-  source: 'paid' | 'incurred';
+  source: string;
   ultimate: number;
   ibnr: number;
   status: 'success' | 'warning' | 'error' | 'disabled' | 'failed' | 'incompatible';

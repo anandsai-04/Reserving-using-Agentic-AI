@@ -160,14 +160,28 @@ class Triangle:
                     self.counts[ay] = v
                     break
 
+        # Entity column detection for correct premium and exposure aggregation
+        ent_col = None
+        for c in df.columns:
+            if str(c).lower() in ['grcode', 'entity', 'company', 'company_id', 'group']:
+                ent_col = c
+                break
+
         if prem_col:
             df[prem_col] = pd.to_numeric(df[prem_col], errors='coerce')
-            prem_series = df.groupby(ay_col)[prem_col].max()
+            if ent_col and ent_col in df.columns:
+                # Group by entity and accident year to get the first (since it is repeated per lag), then sum across entities
+                prem_series = df.groupby([ent_col, ay_col])[prem_col].first().groupby(ay_col).sum()
+            else:
+                prem_series = df.groupby(ay_col)[prem_col].max()
             self.premiums = prem_series.dropna().to_dict()
             
         if exp_col:
             df[exp_col] = pd.to_numeric(df[exp_col], errors='coerce')
-            exp_series = df.groupby(ay_col)[exp_col].max()
+            if ent_col and ent_col in df.columns:
+                exp_series = df.groupby([ent_col, ay_col])[exp_col].first().groupby(ay_col).sum()
+            else:
+                exp_series = df.groupby(ay_col)[exp_col].max()
             self.exposures = exp_series.dropna().to_dict()
 
         self.data_type = 'paid' if paid_col else ('incurred' if inc_col else 'paid')
@@ -252,7 +266,7 @@ class Triangle:
         
         return diag
         
-    def compute_ldfs(self):
+    def compute_ldfs_for_matrix(self, matrix):
         n = len(self.dev_ages)
         ldfs = []
         
@@ -262,7 +276,7 @@ class Triangle:
             factors = []
             col_factors = []
             
-            for row in self.matrix:
+            for row in matrix:
                 cur = row[j]
                 nxt = row[j+1]
                 if cur is not None and nxt is not None and not np.isnan(cur) and not np.isnan(nxt) and cur > 0:
@@ -310,6 +324,13 @@ class Triangle:
             'isTail': True
         })
         return ldfs
+
+    def compute_ldfs(self):
+        return self.compute_ldfs_for_matrix(self.matrix)
+
+    def compute_incurred_ldfs(self):
+        return self.compute_ldfs_for_matrix(self.incurred_matrix)
+
 
     def compute_cdfs(self, ldfs_list):
         n = len(ldfs_list)
