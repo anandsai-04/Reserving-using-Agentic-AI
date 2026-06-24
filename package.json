@@ -1,8 +1,0 @@
-{
-  "name": "reserving-using-agentic-ai",
-  "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "vercel-build": "cd frontend && npm install && npm run build && cd .. && rm -rf public && cp -R frontend/out public"
-  }
-}
