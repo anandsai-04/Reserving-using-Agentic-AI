@@ -308,12 +308,20 @@ async def execute_model(req: ExecuteRequest):
         session['dev_ages']  = t_eval.dev_ages
         session['totalIBNR'] = model.get_total_ibnr()
         session['totalUlt']  = model.get_total_ultimate()
+        
+        # Store diagnostics for Analysis Agent
+        session['loss_ratios'] = loss_ratios
+        session['suggested_elr'] = elr_suggestion
+        session['ldf_stability'] = ldf_stability
+        session['volatility'] = getattr(model, 'volatility', 0)
+        session['ratio_triangles'] = getattr(model, 'ratio_triangles', None) # If available
+        session['curve_fitting_results'] = getattr(model, 'curve_fitting_results', None) # If available
 
         return {
             "success":   True,
             "results":   session['results'],
             "totalIBNR": session['totalIBNR'],
-            "totalUlt":  model.get_total_ultimate(),
+            "totalUlt":  session['totalUlt'],
             "totalPaid": total_paid,
             "narration": final_msg,
             "cdfs":      cdfs_curve,
@@ -343,6 +351,80 @@ async def chat(req: ChatRequest):
         return {"success": True, "reply": reply}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+@app.post("/api/execute_all")
+async def execute_all_models(req: ExecuteRequest):
+    try:
+        session = agent_workflow.SESSION_STORE.get(req.session_id)
+        if not session: return {"success": False, "error": "Invalid session_id"}
+        
+        from models.methods import METHODS
+        import copy
+        t_eval = copy.deepcopy(session['triangle'])
+        
+        if req.rate_changes and t_eval.premiums:
+            try:
+                import pandas as pd
+                from models.on_level import OnLevelPremiumCalculator
+                prem_data = [{"accident_year": int(ay), "earned_premium": float(p)} for ay, p in t_eval.premiums.items()]
+                calc = OnLevelPremiumCalculator(pd.DataFrame(prem_data), pd.DataFrame(req.rate_changes))
+                on_level_df = calc.calculate()
+                t_eval.premiums = dict(zip(on_level_df["accident_year"], on_level_df["on_level_premium"]))
+            except:
+                pass
+
+        results = []
+        for code, MethodClass in METHODS.items():
+            if MethodClass.needs_premium and not t_eval.premiums:
+                results.append({"code": code, "name": MethodClass.label, "ibnr": None, "ultimate": None, "error": "Requires Premium"})
+                continue
+                
+            model = MethodClass()
+            try:
+                model.fit(t_eval, req.params, req.custom_ldfs)
+                results.append({
+                    "code": code,
+                    "name": MethodClass.label,
+                    "ibnr": round(model.get_total_ibnr(), 0),
+                    "ultimate": round(model.get_total_ultimate(), 0),
+                    "error": None
+                })
+            except Exception as e:
+                results.append({"code": code, "name": MethodClass.label, "ibnr": None, "ultimate": None, "error": str(e)})
+                
+        return {"success": True, "results": results}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/export/{session_id}")
+async def export_data(session_id: str):
+    try:
+        session = agent_workflow.SESSION_STORE.get(session_id)
+        if not session: return JSONResponse(status_code=404, content={"error": "Session not found"})
+        
+        triangle = session.get('triangle')
+        if not triangle: return JSONResponse(status_code=400, content={"error": "No triangle data"})
+        
+        export_obj = {
+            "currency": "USD",
+            "valuation_year": triangle.valuation_year,
+            "accident_years": triangle.accident_years,
+            "development_ages": triangle.dev_ages,
+            "gross_paid_matrix": triangle.matrix,
+            "gross_incurred_matrix": triangle.incurred_matrix,
+            "gross_outstanding_matrix": triangle.outstanding_matrix if hasattr(triangle, 'outstanding_matrix') else None,
+            "closed_claim_counts": triangle.closed_counts_matrix if hasattr(triangle, 'closed_counts_matrix') else None,
+            "reported_claim_counts": triangle.reported_counts_matrix if hasattr(triangle, 'reported_counts_matrix') else None,
+            "earned_premiums": triangle.premiums,
+            "exposures": triangle.exposures,
+            "selected_ldfs": session.get('ldfs'),
+            "total_ibnr_selected": session.get('totalIBNR'),
+            "total_ultimate_selected": session.get('totalUlt')
+        }
+        
+        return JSONResponse(content=export_obj)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 # Native HTML Hosting
 import os

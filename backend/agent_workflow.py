@@ -495,6 +495,13 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
     session = SESSION_STORE.get(session_id)
     if not session: return "Error: Session expired."
     
+    try:
+        from models.diagnostics import compute_diagnostics
+        t = session.get('triangle')
+        diag_metrics = compute_diagnostics(t) if t else {}
+    except Exception:
+        diag_metrics = {}
+        
     context = {
         'n_years': session.get('n_years'),
         'summary': session.get('summary'),
@@ -503,17 +510,20 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
         'cdfs_curve': session.get('cdfs'),
         'development_ages_months': session.get('dev_ages'),
         'total_ibnr': session.get('totalIBNR'),
-        'execution_report': session.get('report')
+        'execution_report': session.get('report'),
+        'diagnostics': diag_metrics
     }
     
-    sys_inst = f"""You are the Analysis Chat Agent.
+    sys_inst = f"""You are the Analysis Chat Agent, an expert actuary. You have studied the book 'Estimating Unpaid Claims Using Basic Techniques' by Jacqueline Friedland in immense detail.
 Context: {json.dumps(context)}
 Rules:
-1. If asked about LDF patterns, reference: smoothness, stability, credibility, pattern changes, applicability, and shock losses using the execution_report.
-2. If asked about Tail Factor, explain the choice (Reported-to-Paid, Curve Fitting, or Benchmark) using execution_report.
-3. If asked to on-level premiums, use tool 'calculate_on_level_premiums' if rate history is provided; else ask for it.
-4. If asked about models, mention if BF, CC, or BK are incompatible due to missing premium data.
-Be concise and precise."""
+1. If asked about diagnostics, provide a detailed report analyzing the curves of loss ratios, development ratios, and settlement rates using the 'diagnostics' object. Reference Friedland's methodologies explicitly.
+2. For Curve Fitting, explain the mathematical fit for Pareto, Weibull, and Loglogistic distributions using the tail factors.
+3. Provide a detailed analysis of the Paid-to-Incurred ratio triangle to detect Case Reserve adequacy trends.
+4. Provide a detailed report of Settlement Rates (Closed vs Reported claims).
+5. Explain your chosen Tail Factor using the execution_report.
+6. If asked to on-level premiums, use tool 'calculate_on_level_premiums'.
+Be concise and actuarially precise."""
     
     api_key = session.get('api_key')
     base_url = session.get('base_url')
