@@ -5,19 +5,48 @@ import { RankedModel } from '../types';
 interface ModelSelectorProps {
   ranked: RankedModel[];
   recommendation: string | null;
+  dataSource: 'paid' | 'incurred';
+  onChangeDataSource: (source: 'paid' | 'incurred') => void;
   onSelectMethod: (code: string) => void;
 }
 
 export default function ModelSelector({
   ranked,
   recommendation,
+  dataSource,
+  onChangeDataSource,
   onSelectMethod,
 }: ModelSelectorProps) {
   return (
     <div className="flex flex-col flex-1 animate-slide-in">
-      <div className="view-header mb-5">
-        <h2 className="text-lg font-bold text-text-main">Select Execution Model</h2>
-        <p className="text-xs text-text-sub mt-0.5">Select a tool for the Execution Agent</p>
+      <div className="view-header mb-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-text-main">Select Execution Model</h2>
+          <p className="text-xs text-text-sub mt-0.5">Select a tool for the Execution Agent</p>
+        </div>
+        
+        {/* Data Source Selector */}
+        <div className="flex items-center gap-2 bg-bg-1 border border-border rounded-lg px-3 py-1.5 shadow-sm">
+          <span className="text-[11.5px] font-semibold text-text-sub font-sans">Data Source:</span>
+          <div className="flex gap-1 bg-bg-2 p-0.5 rounded border border-border-2">
+            <button
+              onClick={() => onChangeDataSource('paid')}
+              className={`px-2.5 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
+                dataSource === 'paid' ? 'bg-accent text-white shadow-sm' : 'text-text-sub hover:text-text-main'
+              }`}
+            >
+              Paid
+            </button>
+            <button
+              onClick={() => onChangeDataSource('incurred')}
+              className={`px-2.5 py-1 text-[11px] font-bold rounded transition-colors cursor-pointer ${
+                dataSource === 'incurred' ? 'bg-accent text-white shadow-sm' : 'text-text-sub hover:text-text-main'
+              }`}
+            >
+              Incurred
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* AI Recommendation Message */}

@@ -5,10 +5,11 @@ import { ModelParam } from '../types';
 interface ParamsViewProps {
   code: string;
   params: ModelParam[];
+  dataSource: 'paid' | 'incurred';
   onSubmit: (paramValues: Record<string, any>) => void;
 }
 
-export default function ParamsView({ code, params, onSubmit }: ParamsViewProps) {
+export default function ParamsView({ code, params, dataSource, onSubmit }: ParamsViewProps) {
   const [values, setValues] = useState<Record<string, any>>({});
 
   useEffect(() => {
@@ -33,8 +34,11 @@ export default function ParamsView({ code, params, onSubmit }: ParamsViewProps) 
 
   return (
     <div className="flex flex-col flex-1 max-w-lg animate-slide-in">
-      <div className="mb-5">
+      <div className="mb-5 flex items-center justify-between">
         <h2 className="text-lg font-bold text-text-main">Parameters for {code}</h2>
+        <span className="text-[10px] font-bold uppercase tracking-wider bg-bg-1 border border-border text-accent px-2 py-1 rounded">
+          Source: {dataSource === 'incurred' ? 'Incurred' : 'Paid'}
+        </span>
       </div>
 
       <div className="bg-bg-1 border border-border rounded-lg p-5 flex flex-col gap-4.5">

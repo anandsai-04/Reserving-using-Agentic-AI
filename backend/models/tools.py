@@ -4,6 +4,8 @@ All calculations that should NOT be done by an LLM.
 These run in Python and return exact numbers to feed into agent prompts.
 """
 import numpy as np
+from typing import Optional, List
+
 
 
 # ── Environment Sensitivity Lookup (deterministic, per method) ─────────────
@@ -186,3 +188,118 @@ def compute_tail_factor(custom_ldfs: list, triangle=None) -> dict:
 
     return {"chosen": chosen, "reason": reason,
             "rtp_candidate": tail_rtp, "curve_candidate": tail_curve}
+
+
+def compute_suggested_elr(triangle, source: str = "paid", mature_cdf_threshold: float = 1.05) -> Optional[float]:
+    """
+    Suggested ELR based on:
+    Sum(Ultimate_mature) / Sum(Premium_mature)
+    where Ultimate_mature = latest_loss * CDF of the selected source.
+    """
+    if not triangle.premiums:
+        return None
+
+    try:
+        # Determine mature accident years
+        ldfs_raw = triangle.compute_ldfs() if source == "paid" else triangle.compute_incurred_ldfs()
+        ldfs_list = [(r['volumeWeighted'] if r['volumeWeighted'] is not None else 1.0) for r in ldfs_raw[:-1]] + [1.0]
+        cdfs = triangle.compute_cdfs(ldfs_list)
+        
+        if source == "incurred" and triangle.incurred_matrix:
+            diag = [next((v for v in reversed(row) if v is not None), 0) for row in triangle.incurred_matrix]
+            matrix_to_use = triangle.incurred_matrix
+        else:
+            diag = triangle.get_latest_diagonal()
+            matrix_to_use = triangle.matrix
+        
+        # Calculate Sum(Ultimate_mature) / Sum(Premium_mature)
+        mature_ultimate_sum = 0.0
+        mature_premium_sum = 0.0
+        for i, ay in enumerate(triangle.accident_years):
+            row = matrix_to_use[i]
+            dev_idx = next((j for j, v in reversed(list(enumerate(row))) if v is not None), 0)
+            cdf = cdfs[dev_idx] if dev_idx < len(cdfs) else 1.0
+            if cdf <= mature_cdf_threshold:
+                prem = triangle.premiums.get(ay, 0)
+                paid = diag[i]
+                if prem > 0 and paid is not None:
+                    mature_ultimate_sum += (paid * cdf)
+                    mature_premium_sum += prem
+                    
+        if mature_premium_sum > 0:
+            return round((mature_ultimate_sum / mature_premium_sum) * 100, 2)
+            
+        # 2. Try Chain Ladder ultimate / premium (all years)
+        used_up = 0.0
+        total_rep = 0.0
+        for i, ay in enumerate(triangle.accident_years):
+            prem = triangle.premiums.get(ay)
+            paid = diag[i]
+            row = matrix_to_use[i]
+            dev_idx = next((j for j, v in reversed(list(enumerate(row))) if v is not None), 0)
+            cdf = cdfs[dev_idx] if dev_idx < len(cdfs) else 1.0
+            pct_rep = 1.0 / cdf if cdf > 0 else 1.0
+            if prem and paid is not None:
+                used_up  += prem * pct_rep
+                total_rep += paid
+        if used_up > 0:
+            return round(total_rep / used_up * 100, 2)
+            
+    except Exception:
+        pass
+        
+    return 65.0
+
+
+def compute_mature_accident_years(triangle, mature_cdf_threshold: float = 1.05) -> dict:
+    """
+    Flag mature years when:
+    CDF <= mature_cdf_threshold
+    """
+    mature_years = []
+    reasons = {}
+    try:
+        ldfs_raw = triangle.compute_ldfs()
+        ldfs_list = [(r['volumeWeighted'] if r['volumeWeighted'] is not None else 1.0) for r in ldfs_raw[:-1]] + [1.0]
+        cdfs = triangle.compute_cdfs(ldfs_list)
+        
+        for i, ay in enumerate(triangle.accident_years):
+            row = triangle.matrix[i]
+            dev_idx = next((j for j, v in reversed(list(enumerate(row))) if v is not None), 0)
+            cdf = cdfs[dev_idx] if dev_idx < len(cdfs) else 1.0
+            
+            reasons_ay = []
+            if cdf <= mature_cdf_threshold:
+                reasons_ay.append(f"CDF ({cdf:.3f}) <= {mature_cdf_threshold}")
+                
+            if reasons_ay:
+                mature_years.append(ay)
+                reasons[ay] = " and ".join(reasons_ay)
+    except Exception:
+        pass
+        
+    return {
+        "mature_years": mature_years,
+        "reasoning": reasons
+    }
+
+
+def compute_premium_availability(triangle) -> bool:
+    return bool(triangle.premiums)
+
+
+def compute_method_availability(triangle) -> dict:
+    has_premium = compute_premium_availability(triangle)
+    availability = {}
+    for code in ["CL", "MCL", "CLK", "CO"]:
+        availability[code] = {
+            "available": True,
+            "reason": None
+        }
+    for code in ["BF", "BK", "CC", "ELR"]:
+        availability[code] = {
+            "available": has_premium,
+            "reason": None if has_premium else "Missing Earned Premium"
+        }
+    return availability
+

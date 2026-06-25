@@ -1,15 +1,16 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { SummaryData } from '../types';
-import { fmt } from '../utils';
+import { fmt, CurrencyCode } from '../utils';
 
 interface SummaryViewProps {
   summary: SummaryData;
+  currency?: CurrencyCode;
   onProceed: () => void;
   onUpdateMappings: (newRoles: Record<string, string | null>, selectedEntities?: string[] | null) => Promise<void>;
 }
 
-export default function SummaryView({ summary, onProceed, onUpdateMappings }: SummaryViewProps) {
+export default function SummaryView({ summary, currency = 'USD', onProceed, onUpdateMappings }: SummaryViewProps) {
   const roles = [
     { key: 'origin_col', label: 'Origin Period (AY)', roleDesc: 'Identifies the accident/underwriting period' },
     { key: 'dev_col', label: 'Development Lag', roleDesc: 'Identifies the duration from the origin period' },
@@ -130,7 +131,7 @@ export default function SummaryView({ summary, onProceed, onUpdateMappings }: Su
             Total Paid
           </div>
           <div className="text-2xl font-bold font-mono text-text-main tracking-tight">
-            {fmt(summary.totalPaid)}
+            {fmt(summary.totalPaid, currency)}
           </div>
           <div className="text-xs text-text-sub mt-1">
             latest diagonal

@@ -24,8 +24,8 @@ class Benktander(MethodBase):
         
     def _compute(self):
         ays = self.triangle.accident_years
-        diag = self.triangle.get_latest_diagonal()
-        dev_idx = [next((i for i, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in self.triangle.matrix]
+        diag = [next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
+        dev_idx = [next((i for i, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
         
         elr = float(self.params.get('aprioriLossRatio', 65)) / 100.0
         iters = int(self.params.get('iterations', 1))

@@ -9,8 +9,8 @@ class MackChainladder(MethodBase):
     
     def _compute(self):
         ays = self.triangle.accident_years
-        diag = self.triangle.get_latest_diagonal()
-        matrix = self.triangle.matrix
+        matrix = self.matrix
+        diag = [next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0) for row in matrix]
         dev_idx = [next((i for i, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in matrix]
         
         # Calculate sigma squared for each period

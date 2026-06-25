@@ -182,6 +182,9 @@ def calculate_ldfs(session_id: str) -> str:
         ldfs = t.compute_ldfs()
         session['ldfs'] = ldfs
         
+        inc_ldfs = t.compute_incurred_ldfs()
+        session['incurred_ldfs'] = inc_ldfs
+        
         n = session.get('n_years', 5)
         # Assuming we just log the n-year request, exact usage in app.js uses the 'weighted5yr' or 'straightAvg' keys.
         # We will inform the agent it was calculated.
@@ -246,6 +249,9 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     env_base_url = os.environ.get("LLM_BASE_URL")
     env_model_name = os.environ.get("LLM_MODEL_NAME")
 
+    # Determine if using default/fallback settings
+    is_default = (not api_key and not env_api_key) or (api_key == "ollama") or (base_url and "ngrok-free.dev" in base_url)
+
     # Fallbacks (UI > Environment > Hardcoded Defaults)
     api_key = api_key or env_api_key or "ollama"
     base_url = base_url or env_base_url or "https://encrypt-nail-smasher.ngrok-free.dev/v1"
@@ -264,8 +270,12 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     except Exception as e:
         return f"Agent Error: {str(e)}"
     
+    # Speed Optimization: Default/fallback settings should fail fast to avoid blocking actuarial workbench
+    timeout_val = 3.0 if is_default else 7.0
+    max_attempts = 1 if is_default else 2
+
     # Simple retry mechanism
-    for attempt in range(3):
+    for attempt in range(max_attempts):
         try:
             response = client.chat.completions.create(
                 model=model_name,
@@ -274,21 +284,22 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
-                timeout=15.0
+                timeout=timeout_val
             )
             return response.choices[0].message.content
         except openai.AuthenticationError:
             return "Agent Error: Authentication failed. Please verify your Render Environment Variables."
         except openai.RateLimitError:
-            if attempt == 2:
+            if attempt == max_attempts - 1:
                 return "Agent Error: Quota/Rate limit exceeded (429). Please wait 60 seconds and try again."
-            time.sleep(2)
+            time.sleep(1)
         except openai.APIConnectionError:
-            return "Agent Error: The LLM server is unreachable (API Connection Error)."
+            if attempt == max_attempts - 1:
+                return "Agent Error: The LLM server is unreachable (API Connection Error)."
         except Exception as e:
-            if attempt == 2:
+            if attempt == max_attempts - 1:
                 return f"Agent Error: {str(e)}"
-            time.sleep(2)
+            time.sleep(1)
     return "Error"
 
 # ==========================================
@@ -469,13 +480,21 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     triangle = updated_session.get('triangle')
     triangle_data = None
     if triangle:
+        from models.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
+        mature_info = compute_mature_accident_years(triangle)
         triangle_data = {
             "accidentYears": triangle.accident_years,
             "devAges": triangle.dev_ages,
             "matrix": triangle.matrix,
             "incurred_matrix": triangle.incurred_matrix,
             "ldfs": updated_session.get('ldfs'),
-            "hasPremium": bool(triangle.premiums)
+            "incurred_ldfs": updated_session.get('incurred_ldfs'),
+            "hasPremium": bool(triangle.premiums),
+            "suggested_elr_paid": compute_suggested_elr(triangle, "paid"),
+            "suggested_elr_incurred": compute_suggested_elr(triangle, "incurred"),
+            "suggested_mature_years": mature_info.get("mature_years", []),
+            "mature_reasoning": mature_info.get("reasoning", {}),
+            "method_availability": compute_method_availability(triangle)
         }
         
     yield json.dumps({
@@ -486,6 +505,74 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
         "recommendation": recommender_text
     }) + "\n"
 
+def run_reserve_recommendation_agent(session_id: str, results_summary: list) -> dict:
+    """Invokes the Reserve Recommender Agent to recommend the best method based on comparative outcomes."""
+    session = SESSION_STORE.get(session_id)
+    if not session:
+        return {
+            "recommended_method": "None",
+            "confidence": "Low",
+            "reasoning": ["Session expired or not found."]
+        }
+        
+    api_key = session.get('api_key')
+    base_url = session.get('base_url')
+    model_name = session.get('model_name')
+    
+    summary_data = json.dumps(results_summary, indent=2)
+    
+    sys_inst = (
+        "You are an expert actuarial AI Reserving Recommender. You analyze loss reserving outputs "
+        "across multiple methods (Chain Ladder, Mack, BF, Benktander, Cape Cod, Case Outstanding, Clark) "
+        "and recommend the most appropriate method for the best estimate. "
+        "Provide your recommendation in strict JSON format containing three fields:\n"
+        "1. 'recommended_method': The code of the method (e.g. 'BK', 'BF', 'CL', 'MCL', 'CC')\n"
+        "2. 'confidence': The confidence level ('High', 'Medium', 'Low')\n"
+        "3. 'reasoning': An array of strings with key reasons for the recommendation. Do not exceed 4 reasons.\n"
+        "Respond ONLY with the raw JSON string. Do not include markdown code block formatting (like ```json)."
+    )
+    
+    prompt = (
+        f"Here are the calculated reserving indications for the current session:\n{summary_data}\n\n"
+        "Review these indications. Choose the best estimate method based on: stability of IBNR, "
+        "maturity score (immature years favor BF/BK, mature favor CL/Mack), volatility of Chain Ladder, "
+        "and Reserve-to-Case Ratio. Return the JSON recommendation."
+    )
+    
+    raw_response = run_agent(api_key, base_url, model_name, sys_inst, prompt, [])
+    
+    # Try parsing JSON
+    try:
+        cleaned = raw_response.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines)
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+        return json.loads(cleaned)
+    except Exception as e:
+        # Fallback heuristic recommendation if LLM fails
+        best_method = "CL"
+        for r in results_summary:
+            if r.get('status') == 'success' and r.get('code') in ['BK', 'BF', 'CC']:
+                best_method = r['code']
+                break
+        return {
+            "recommended_method": best_method,
+            "confidence": "Medium",
+            "reasoning": [
+                "Auto-fallback heuristic recommendation",
+                "Favored credibility method (BK/BF/CC) over raw Chain Ladder for stability.",
+                f"Parsing details: {str(e)}"
+            ]
+        }
+
+
 # ==========================================
 # PARALLEL CHAT AGENT
 # ==========================================
@@ -495,6 +582,25 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
     session = SESSION_STORE.get(session_id)
     if not session: return "Error: Session expired."
     
+    try:
+        from models.diagnostics import compute_diagnostics
+        t = session.get('triangle')
+        diag_metrics = compute_diagnostics(t) if t else {}
+        
+        # Prune large matrices to significantly reduce token usage
+        if 'ratio_triangles' in diag_metrics:
+            for key in ['paid_to_incurred', 'settlement_rate']:
+                matrix = diag_metrics['ratio_triangles'].get(key, [])
+                if matrix and isinstance(matrix, list) and len(matrix) > 0 and isinstance(matrix[0], list):
+                    cols = len(matrix[0])
+                    avgs = []
+                    for c in range(cols):
+                        col_vals = [matrix[r][c] for r in range(len(matrix)) if c < len(matrix[r]) and matrix[r][c] is not None]
+                        avgs.append(round(sum(col_vals)/len(col_vals), 3) if col_vals else None)
+                    diag_metrics['ratio_triangles'][key] = {"average_by_development_age": avgs, "note": "Full matrix compressed to averages to save tokens."}
+    except Exception:
+        diag_metrics = {}
+        
     context = {
         'n_years': session.get('n_years'),
         'summary': session.get('summary'),
@@ -503,17 +609,20 @@ def run_parallel_chat(session_id: str, message: str, history: list) -> str:
         'cdfs_curve': session.get('cdfs'),
         'development_ages_months': session.get('dev_ages'),
         'total_ibnr': session.get('totalIBNR'),
-        'execution_report': session.get('report')
+        'execution_report': session.get('report'),
+        'diagnostics': diag_metrics
     }
     
-    sys_inst = f"""You are the Analysis Chat Agent.
+    sys_inst = f"""You are the Analysis Chat Agent, an expert actuary. You have studied the book 'Estimating Unpaid Claims Using Basic Techniques' by Jacqueline Friedland in immense detail.
 Context: {json.dumps(context)}
 Rules:
-1. If asked about LDF patterns, reference: smoothness, stability, credibility, pattern changes, applicability, and shock losses using the execution_report.
-2. If asked about Tail Factor, explain the choice (Reported-to-Paid, Curve Fitting, or Benchmark) using execution_report.
-3. If asked to on-level premiums, use tool 'calculate_on_level_premiums' if rate history is provided; else ask for it.
-4. If asked about models, mention if BF, CC, or BK are incompatible due to missing premium data.
-Be concise and precise."""
+1. If asked about diagnostics, provide a detailed report analyzing the curves of loss ratios, development ratios, and settlement rates using the 'diagnostics' object. Reference Friedland's methodologies explicitly.
+2. For Curve Fitting, explain the mathematical fit for Pareto, Weibull, and Loglogistic distributions using the tail factors.
+3. Provide a detailed analysis of the Paid-to-Incurred ratio triangle to detect Case Reserve adequacy trends.
+4. Provide a detailed report of Settlement Rates (Closed vs Reported claims).
+5. Explain your chosen Tail Factor using the execution_report.
+6. If asked to on-level premiums, use tool 'calculate_on_level_premiums'.
+Be concise and actuarially precise."""
     
     api_key = session.get('api_key')
     base_url = session.get('base_url')

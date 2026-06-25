@@ -1,17 +1,24 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { TriangleData, SummaryData } from '../types';
-import { fmtShort } from '../utils';
+import { fmtShort, CurrencyCode } from '../utils';
 
 interface TriangleViewProps {
   triangle: TriangleData;
   summary: SummaryData;
+  currency?: CurrencyCode;
   ldfBase: string;
   onChangeLdfBase: (base: string) => void;
   customLDFs: number[];
   onChangeCustomLDFs: (ldfs: number[]) => void;
   tailFactor: number;
   onChangeTailFactor: (val: number) => void;
+  incurredLdfBase: string;
+  onChangeIncurredLdfBase: (base: string) => void;
+  customIncurredLDFs: number[];
+  onChangeCustomIncurredLDFs: (ldfs: number[]) => void;
+  incurredTailFactor: number;
+  onChangeIncurredTailFactor: (val: number) => void;
   onProceed: () => void;
   onUpdateEntities: (selectedEntities: string[] | null) => Promise<void>;
 }
@@ -19,16 +26,24 @@ interface TriangleViewProps {
 export default function TriangleView({
   triangle,
   summary,
+  currency = 'USD',
   ldfBase,
   onChangeLdfBase,
   customLDFs,
   onChangeCustomLDFs,
   tailFactor,
   onChangeTailFactor,
+  incurredLdfBase,
+  onChangeIncurredLdfBase,
+  customIncurredLDFs,
+  onChangeCustomIncurredLDFs,
+  incurredTailFactor,
+  onChangeIncurredTailFactor,
   onProceed,
   onUpdateEntities,
 }: TriangleViewProps) {
   const [inputs, setInputs] = useState<string[]>([]);
+  const [incurredInputs, setIncurredInputs] = useState<string[]>([]);
   
   // Entity states
   const [entityMode, setEntityMode] = useState<'all' | 'single' | 'custom'>('all');
@@ -39,6 +54,10 @@ export default function TriangleView({
   useEffect(() => {
     setInputs(customLDFs.map((v) => v.toFixed(4)));
   }, [customLDFs]);
+
+  useEffect(() => {
+    setIncurredInputs(customIncurredLDFs.map((v) => v.toFixed(4)));
+  }, [customIncurredLDFs]);
 
   // Sync entity states with summary updates
   useEffect(() => {
@@ -70,6 +89,19 @@ export default function TriangleView({
     }
   };
 
+  const handleIncurredLdfChange = (idx: number, valStr: string) => {
+    const updatedInputs = [...incurredInputs];
+    updatedInputs[idx] = valStr;
+    setIncurredInputs(updatedInputs);
+
+    const val = parseFloat(valStr);
+    if (!isNaN(val)) {
+      const updatedLDFs = [...customIncurredLDFs];
+      updatedLDFs[idx] = val;
+      onChangeCustomIncurredLDFs(updatedLDFs);
+    }
+  };
+
   const hasIncurred = useMemo(() => {
     return (
       triangle.incurred_matrix &&
@@ -78,12 +110,75 @@ export default function TriangleView({
     );
   }, [triangle]);
 
+  const linkRatiosMatrix = useMemo(() => {
+    return triangle.matrix.map((row) => {
+      const linkRatios: (number | null)[] = [];
+      for (let j = 0; j < row.length - 1; j++) {
+        const cur = row[j];
+        const nxt = row[j + 1];
+        if (cur !== null && nxt !== null && cur !== 0) {
+          linkRatios.push(nxt / cur);
+        } else {
+          linkRatios.push(null);
+        }
+      }
+      return linkRatios;
+    });
+  }, [triangle.matrix]);
+
+  const incurredLinkRatiosMatrix = useMemo(() => {
+    if (!triangle.incurred_matrix) return [];
+    return triangle.incurred_matrix.map((row) => {
+      const linkRatios: (number | null)[] = [];
+      for (let j = 0; j < row.length - 1; j++) {
+        const cur = row[j];
+        const nxt = row[j + 1];
+        if (cur !== null && nxt !== null && cur !== 0) {
+          linkRatios.push(nxt / cur);
+        } else {
+          linkRatios.push(null);
+        }
+      }
+      return linkRatios;
+    });
+  }, [triangle.incurred_matrix]);
+
+  const linkRatioHeaders = useMemo(() => {
+    const headers: string[] = [];
+    for (let i = 0; i < triangle.devAges.length - 1; i++) {
+      headers.push(`${triangle.devAges[i]}-${triangle.devAges[i + 1]}`);
+    }
+    return headers;
+  }, [triangle.devAges]);
+
   const getLdfRow = (label: string, key: 'volumeWeighted' | 'straightAvg' | 'weighted3yr' | 'weighted5yr') => {
     const isActive = ldfBase === key;
     return (
       <tr className={`ldf-row ${isActive ? 'active-row bg-accent-dim/15 font-semibold text-text-main' : ''}`}>
         <td className="tri-ay">{label}</td>
         {triangle.ldfs.slice(0, -1).map((s, idx) => {
+          const val = s[key];
+          return (
+            <td
+              key={idx}
+              className={`ldf-cell ${isActive ? 'active-base text-accent font-bold' : ''}`}
+            >
+              {val !== null ? val.toFixed(3) : '—'}
+            </td>
+          );
+        })}
+        <td></td>
+      </tr>
+    );
+  };
+
+  const getIncurredLdfRow = (label: string, key: 'volumeWeighted' | 'straightAvg' | 'weighted3yr' | 'weighted5yr') => {
+    const isActive = incurredLdfBase === key;
+    const ldfs = triangle.incurred_ldfs || [];
+    return (
+      <tr className={`ldf-row ${isActive ? 'active-row bg-accent-dim/15 font-semibold text-text-main' : ''}`}>
+        <td className="tri-ay">{label}</td>
+        {ldfs.slice(0, -1).map((s, idx) => {
           const val = s[key];
           return (
             <td
@@ -287,23 +382,9 @@ export default function TriangleView({
 
       {/* ── 1. Paid Claims Triangle (Active Projector) ────────────────── */}
       <div className="space-y-4">
-        <div className="view-header flex justify-between items-start">
-          <div>
-            <h2 className="text-lg font-bold text-text-main">Cumulative Paid Claims Triangle</h2>
-            <p className="text-xs text-text-sub mt-0.5">Active projection source triangle with LDF selection options.</p>
-          </div>
-          <div className="view-actions">
-            <select
-              value={ldfBase}
-              onChange={(e) => onChangeLdfBase(e.target.value)}
-              className="bg-bg-2 border border-border-2 rounded px-3 py-1 text-xs text-text-main outline-none focus:border-accent h-8 cursor-pointer"
-            >
-              <option value="volumeWeighted">Vol. Weighted Avg</option>
-              <option value="straightAvg">Straight Avg</option>
-              <option value="weighted3yr">3-Year Weighted Avg</option>
-              <option value="weighted5yr">5-Year Weighted Avg</option>
-            </select>
-          </div>
+        <div>
+          <h2 className="text-lg font-bold text-text-main">Cumulative Paid Claims Triangle</h2>
+          <p className="text-xs text-text-sub mt-0.5">Active projection source cumulative claims values.</p>
         </div>
 
         <div className="table-scroll border border-border rounded-lg bg-bg-1 max-w-full">
@@ -328,49 +409,101 @@ export default function TriangleView({
                         key={dev}
                         className={`tri-cell ${val === null ? 'empty text-text-muted bg-black/20' : ''}`}
                       >
-                        {val !== null ? fmtShort(val) : '—'}
+                        {val !== null ? fmtShort(val, currency) : '—'}
                       </td>
                     );
                   })}
                 </tr>
               ))}
-
-              {/* Separator spacing */}
-              <tr className="h-2"><td colSpan={triangle.devAges.length + 1}></td></tr>
-
-              {/* Average LDF calculations */}
-              {getLdfRow('Vol. Wtd', 'volumeWeighted')}
-              {getLdfRow('Straight', 'straightAvg')}
-              {getLdfRow('3-Year', 'weighted3yr')}
-              {getLdfRow('5-Year', 'weighted5yr')}
-
-              {/* Editable Selection Row */}
-              <tr className="ldf-row sel-row bg-bg-2">
-                <td className="tri-ay font-bold text-text-main">Selected LDF</td>
-                {inputs.map((v, idx) => (
-                  <td key={idx} className="ldf-cell">
-                    <input
-                      type="number"
-                      value={v}
-                      onChange={(e) => handleLdfChange(idx, e.target.value)}
-                      step="0.001"
-                      className="w-[80px] bg-bg-3 border border-border-2 text-text-main px-2 py-1 rounded font-mono text-xs text-right outline-none focus:border-accent"
-                    />
-                  </td>
-                ))}
-                <td className="ldf-cell tail text-text-muted px-3 text-xs whitespace-nowrap">
-                  <input
-                    type="number"
-                    value={tailFactor}
-                    onChange={(e) => onChangeTailFactor(parseFloat(e.target.value) || 1.0)}
-                    step="0.001"
-                    className="w-[60px] bg-bg-3 border border-border-2 text-text-main px-2 py-1 rounded font-mono text-xs text-center outline-none focus:border-accent mr-1"
-                  />
-                  (tail)
-                </td>
-              </tr>
             </tbody>
           </table>
+        </div>
+
+        {/* Paid Claims Age-to-Age Factors (Link Ratios) Table */}
+        <div className="space-y-3 mt-4 pt-2">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="text-sm font-bold text-text-main">Paid Claims Age-to-Age Factors (Link Ratios)</h3>
+              <p className="text-xs text-text-sub mt-0.5">Individual development factor transitions, averages, and active model inputs.</p>
+            </div>
+            <div className="view-actions">
+              <select
+                value={ldfBase}
+                onChange={(e) => onChangeLdfBase(e.target.value)}
+                className="bg-bg-2 border border-border-2 rounded px-3 py-1 text-xs text-text-main outline-none focus:border-accent h-8 cursor-pointer"
+              >
+                <option value="volumeWeighted">Vol. Weighted Avg</option>
+                <option value="straightAvg">Straight Avg</option>
+                <option value="weighted3yr">3-Year Weighted Avg</option>
+                <option value="weighted5yr">5-Year Weighted Avg</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="table-scroll border border-border rounded-lg bg-bg-1 max-w-full">
+            <table className="tri-table w-full">
+              <thead>
+                <tr>
+                  <th>AY ╲ Dev Transition</th>
+                  {linkRatioHeaders.map((hdr) => (
+                    <th key={hdr}>{hdr}m</th>
+                  ))}
+                  <th>Tail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {triangle.accidentYears.map((ay, i) => (
+                  <tr key={ay}>
+                    <td className="tri-ay">{ay}</td>
+                    {linkRatiosMatrix[i].map((val, j) => (
+                      <td
+                        key={j}
+                        className={`tri-cell ${val === null ? 'empty text-text-muted bg-black/20' : ''}`}
+                      >
+                        {val !== null ? val.toFixed(4) : '—'}
+                      </td>
+                    ))}
+                    <td className="tri-cell empty bg-black/20 text-text-muted">—</td>
+                  </tr>
+                ))}
+
+                {/* Separator spacing */}
+                <tr className="h-2"><td colSpan={linkRatioHeaders.length + 2}></td></tr>
+
+                {/* Average LDF calculations */}
+                {getLdfRow('Vol. Wtd', 'volumeWeighted')}
+                {getLdfRow('Straight', 'straightAvg')}
+                {getLdfRow('3-Year', 'weighted3yr')}
+                {getLdfRow('5-Year', 'weighted5yr')}
+
+                {/* Editable Selection Row */}
+                <tr className="ldf-row sel-row bg-bg-2">
+                  <td className="tri-ay font-bold text-text-main">Selected LDF</td>
+                  {inputs.map((v, idx) => (
+                    <td key={idx} className="ldf-cell">
+                      <input
+                        type="number"
+                        value={v}
+                        onChange={(e) => handleLdfChange(idx, e.target.value)}
+                        step="0.001"
+                        className="w-[80px] bg-bg-3 border border-border-2 text-text-main px-2 py-1 rounded font-mono text-xs text-right outline-none focus:border-accent"
+                      />
+                    </td>
+                  ))}
+                  <td className="ldf-cell tail text-text-muted px-3 text-xs whitespace-nowrap">
+                    <input
+                      type="number"
+                      value={tailFactor}
+                      onChange={(e) => onChangeTailFactor(parseFloat(e.target.value) || 1.0)}
+                      step="0.001"
+                      className="w-[60px] bg-bg-3 border border-border-2 text-text-main px-2 py-1 rounded font-mono text-xs text-center outline-none focus:border-accent mr-1"
+                    />
+                    (tail)
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -378,8 +511,8 @@ export default function TriangleView({
       {hasIncurred && (
         <div className="space-y-4 pt-4 border-t border-border">
           <div>
-            <h3 className="text-sm font-bold text-text-main">Cumulative Incurred Claims Triangle (Reference)</h3>
-            <p className="text-xs text-text-sub mt-0.5">Historical incurred claims (paid + case reserves) for reference comparison.</p>
+            <h3 className="text-sm font-bold text-text-main">Cumulative Incurred Claims Triangle</h3>
+            <p className="text-xs text-text-sub mt-0.5">Historical incurred claims (paid + case reserves).</p>
           </div>
           <div className="table-scroll border border-border rounded-lg bg-bg-1 max-w-full">
             <table className="tri-table w-full">
@@ -402,7 +535,7 @@ export default function TriangleView({
                           key={dev}
                           className={`tri-cell ${val === null ? 'empty text-text-muted bg-black/20' : ''}`}
                         >
-                          {val !== null ? fmtShort(val) : '—'}
+                          {val !== null ? fmtShort(val, currency) : '—'}
                         </td>
                       );
                     })}
@@ -411,6 +544,92 @@ export default function TriangleView({
               </tbody>
             </table>
           </div>
+
+          {/* Incurred Age-to-Age Factors Triangle */}
+          {triangle.incurred_ldfs && (
+            <div className="space-y-3 mt-4 pt-2">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h4 className="text-sm font-bold text-text-main">Incurred Claims Age-to-Age Factors (Link Ratios)</h4>
+                  <p className="text-xs text-text-sub mt-0.5">Historical incurred development transitions, averages, and customized selections.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-text-sub">Incurred LDF Base:</span>
+                  <select
+                    value={incurredLdfBase}
+                    onChange={(e) => onChangeIncurredLdfBase(e.target.value)}
+                    className="bg-bg-2 border border-border-2 rounded px-3 py-1 text-xs text-text-main outline-none focus:border-accent h-8 cursor-pointer"
+                  >
+                    <option value="volumeWeighted">Vol. Weighted Avg</option>
+                    <option value="straightAvg">Straight Avg</option>
+                    <option value="weighted3yr">3-Year Weighted Avg</option>
+                    <option value="weighted5yr">5-Year Weighted Avg</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="table-scroll border border-border rounded-lg bg-bg-1 max-w-full">
+                <table className="tri-table w-full">
+                  <thead>
+                    <tr>
+                      <th>AY ╲ Dev Transition</th>
+                      {linkRatioHeaders.map((hdr) => (
+                        <th key={hdr}>{hdr}m</th>
+                      ))}
+                      <th>Tail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {triangle.accidentYears.map((ay, i) => (
+                      <tr key={ay}>
+                        <td className="tri-ay">{ay}</td>
+                        {incurredLinkRatiosMatrix[i].map((val, j) => (
+                          <td
+                            key={j}
+                            className={`tri-cell ${val === null ? 'empty text-text-muted bg-black/20' : ''}`}
+                          >
+                            {val !== null ? val.toFixed(4) : '—'}
+                          </td>
+                        ))}
+                        <td className="tri-cell empty bg-black/20 text-text-muted">—</td>
+                      </tr>
+                    ))}
+
+                    <tr className="h-2"><td colSpan={linkRatioHeaders.length + 2}></td></tr>
+                    {getIncurredLdfRow('Vol. Wtd', 'volumeWeighted')}
+                    {getIncurredLdfRow('Straight', 'straightAvg')}
+                    {getIncurredLdfRow('3-Year', 'weighted3yr')}
+                    {getIncurredLdfRow('5-Year', 'weighted5yr')}
+
+                    <tr className="ldf-row sel-row bg-bg-2">
+                      <td className="tri-ay font-bold text-text-main">Selected LDF</td>
+                      {incurredInputs.map((v, idx) => (
+                        <td key={idx} className="ldf-cell">
+                          <input
+                            type="number"
+                            value={v}
+                            onChange={(e) => handleIncurredLdfChange(idx, e.target.value)}
+                            step="0.001"
+                            className="w-[80px] bg-bg-3 border border-border-2 text-text-main px-2 py-1 rounded font-mono text-xs text-right outline-none focus:border-accent"
+                          />
+                        </td>
+                      ))}
+                      <td className="ldf-cell tail text-text-muted px-3 text-xs whitespace-nowrap">
+                        <input
+                          type="number"
+                          value={incurredTailFactor}
+                          onChange={(e) => onChangeIncurredTailFactor(parseFloat(e.target.value) || 1.0)}
+                          step="0.001"
+                          className="w-[60px] bg-bg-3 border border-border-2 text-text-main px-2 py-1 rounded font-mono text-xs text-center outline-none focus:border-accent mr-1"
+                        />
+                        (tail)
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -7,6 +7,7 @@ import {
   TriangleData,
   RankedModel,
   ExecuteResult,
+  ExecutionConfig,
 } from './types';
 import StepProgress from './components/StepProgress';
 import SidebarChat from './components/SidebarChat';
@@ -17,8 +18,10 @@ import TriangleView from './components/TriangleView';
 import ModelSelector from './components/ModelSelector';
 import ParamsView from './components/ParamsView';
 import ResultsView from './components/ResultsView';
+import ConfigureAssumptions from './components/ConfigureAssumptions';
+import { CURRENCIES, CurrencyCode } from './utils';
 
-const STEPS = ['Ingestion Pipeline', 'Data Summary', 'Loss Triangle', 'Select Model', 'IBNR Results'];
+const STEPS = ['Ingestion Pipeline', 'Data Summary', 'Loss Triangle', 'Configure Assumptions', 'IBNR Results'];
 
 export default function Page() {
   // UI Steps & State
@@ -31,8 +34,27 @@ export default function Page() {
   const [customLDFs, setCustomLDFs] = useState<number[]>([]);
   const [ldfBase, setLdfBase] = useState('volumeWeighted');
   const [tailFactor, setTailFactor] = useState(1.0);
+  const [customIncurredLDFs, setCustomIncurredLDFs] = useState<number[]>([]);
+  const [incurredLdfBase, setIncurredLdfBase] = useState('volumeWeighted');
+  const [incurredTailFactor, setIncurredTailFactor] = useState(1.0);
+  const [dataSource, setDataSource] = useState<'paid' | 'incurred'>('paid');
   const [ranked, setRanked] = useState<RankedModel[]>([]);
   const [executeResult, setExecuteResult] = useState<ExecuteResult | null>(null);
+  const [currency, setCurrency] = useState<CurrencyCode>('USD');
+  const [configs, setConfigs] = useState<ExecutionConfig>({
+    CL: { enabled: true, runPaid: true, runIncurred: true },
+    MCL: { enabled: true, runPaid: true, runIncurred: true },
+    BF: { enabled: true, runPaid: true, runIncurred: false, aprioriLossRatio: null },
+    BK: { enabled: true, runPaid: true, runIncurred: false, aprioriLossRatio: null, iterations: 2 },
+    CC: { enabled: true, runPaid: true, runIncurred: false, decay: 0.9 },
+    ELR: { enabled: true, runPaid: true, runIncurred: false, matureYears: [] },
+    CLK: { enabled: true, runPaid: true, runIncurred: false, curveType: 'weibull' },
+    CO: { enabled: true, runPaid: true, runIncurred: true }
+  });
+  const [suggestedElrPaid, setSuggestedElrPaid] = useState<number | null>(65.0);
+  const [suggestedElrIncurred, setSuggestedElrIncurred] = useState<number | null>(65.0);
+  const [suggestedMatureYears, setSuggestedMatureYears] = useState<number[]>([]);
+  const [matureCdfThreshold, setMatureCdfThreshold] = useState<number>(1.05);
 
   // Settings
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -59,6 +81,86 @@ export default function Page() {
       setApiKey(localStorage.getItem('ai_api_key') || '');
     }
   }, []);
+
+  // Synchronize suggestions and prefill configs when triangle changes
+  useEffect(() => {
+    if (triangle) {
+      const elrPaid = triangle.suggested_elr_paid !== undefined ? triangle.suggested_elr_paid : 65.0;
+      const elrInc = triangle.suggested_elr_incurred !== undefined ? triangle.suggested_elr_incurred : 65.0;
+      
+      setSuggestedElrPaid(elrPaid);
+      setSuggestedElrIncurred(elrInc);
+      setSuggestedMatureYears(triangle.suggested_mature_years || []);
+
+      setConfigs((prev) => {
+        const nextConfigs = { ...prev };
+        
+        const codes = Object.keys(nextConfigs);
+        for (const code of codes) {
+          const methodConfig = { ...(nextConfigs[code] || { enabled: true, runPaid: true, runIncurred: false }) };
+          
+          if (triangle.method_availability && triangle.method_availability[code]) {
+            methodConfig.enabled = triangle.method_availability[code].available;
+          } else if (['BF', 'BK', 'CC', 'ELR'].includes(code)) {
+            methodConfig.enabled = triangle.hasPremium;
+          }
+ 
+          if (code === 'BF' || code === 'BK') {
+            const appropriateElr = methodConfig.runPaid ? elrPaid : elrInc;
+            methodConfig.aprioriLossRatio = methodConfig.aprioriLossRatio !== null && methodConfig.aprioriLossRatio !== undefined
+              ? methodConfig.aprioriLossRatio 
+              : appropriateElr;
+          }
+ 
+          if (code === 'ELR') {
+            methodConfig.matureYears = methodConfig.matureYears && methodConfig.matureYears.length > 0
+              ? methodConfig.matureYears
+              : (triangle.suggested_mature_years || []);
+          }
+ 
+          nextConfigs[code] = methodConfig;
+        }
+ 
+        return nextConfigs;
+      });
+    }
+  }, [triangle]);
+
+  // Recalculate suggestions when mature CDF threshold changes
+  useEffect(() => {
+    if (sessionId && matureCdfThreshold) {
+      fetch(getApiUrl('recalculate_suggestions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          mature_cdf_threshold: matureCdfThreshold,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            setSuggestedElrPaid(data.suggested_elr_paid);
+            setSuggestedElrIncurred(data.suggested_elr_incurred);
+            setSuggestedMatureYears(data.suggested_mature_years);
+            setConfigs((prev) => {
+              const elrCfg = prev.ELR;
+              if (elrCfg) {
+                return {
+                  ...prev,
+                  ELR: {
+                    ...elrCfg,
+                    matureYears: data.suggested_mature_years,
+                  },
+                };
+              }
+              return prev;
+            });
+          }
+        })
+        .catch((err) => console.error('Failed to recalculate suggestions:', err));
+    }
+  }, [matureCdfThreshold, sessionId]);
 
   const saveSettings = (newBase: string, newModel: string, newKey: string) => {
     setBaseUrl(newBase);
@@ -96,7 +198,7 @@ export default function Page() {
         window.location.hostname === '127.0.0.1';
       const base = isLocal
         ? 'http://localhost:8000/api'
-        : 'https://reserving-using-agentic-ai.onrender.com/api';
+        : 'https://reserving-using-agentic-ai-iaq0.onrender.com/api';
       return `${base}/${endpoint}`;
     }
     return `/api/${endpoint}`;
@@ -137,6 +239,7 @@ export default function Page() {
             setTriangle(msg.triangle);
             setRecommendation(msg.recommendation);
             setCustomLDFs([]); // Clear previous selections
+            setCustomIncurredLDFs([]); // Clear custom incurred selections
             setStep(1);
 
             updateLogMessage(
@@ -313,28 +416,34 @@ export default function Page() {
     setRanked(rankedMethods);
   };
 
-  // Run model calculations
-  const handleExecuteModel = async (methodCode: string, paramValues: Record<string, any>) => {
+  // Run all models concurrently
+  const handleExecuteAllModels = async () => {
     setStep(4);
+    setExecuteResult(null);
     const execMsgId = addLogMessage(
       'agent',
-      `⚙️ <strong>Execution Agent</strong> running ${methodCode} on backend…`,
+      `⚙️ <strong>Execution Agent</strong> running all actuarial models concurrently on backend…`,
       'analyzing'
     );
 
     const ldfsToUse = customLDFs.length > 0 ? customLDFs : triangle?.ldfs.slice(0, -1).map((s: any) => s[ldfBase] ?? 1.0) || [];
+    const incurredLdfsToUse = customIncurredLDFs.length > 0 ? customIncurredLDFs : triangle?.incurred_ldfs?.slice(0, -1).map((s: any) => s[incurredLdfBase] ?? 1.0) || [];
+    
     const payload = {
       session_id: sessionId,
-      method_code: methodCode,
-      params: paramValues,
-      custom_ldfs: [...ldfsToUse, tailFactor],
+      configs: configs,
+      paid_ldfs: [...ldfsToUse, tailFactor],
+      incurred_ldfs: [...incurredLdfsToUse, incurredTailFactor],
+      paid_tail_factor: tailFactor,
+      incurred_tail_factor: incurredTailFactor,
+      mature_cdf_threshold: matureCdfThreshold,
       api_key: apiKey,
       base_url: baseUrl,
       model_name: modelName,
     };
 
     try {
-      const res = await fetch(getApiUrl('execute'), {
+      const res = await fetch(getApiUrl('execute_all'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -344,7 +453,7 @@ export default function Page() {
       if (!data.success) throw new Error(data.error);
 
       setExecuteResult(data);
-      updateLogMessage(execMsgId, 'Execution complete. Report displayed in right panel.');
+      updateLogMessage(execMsgId, 'Multi-model execution complete. Comparative dashboard loaded.');
     } catch (e: any) {
       addLogMessage('error', `Execution failed: ${e.message}`);
       updateLogMessage(execMsgId, `Execution failed: ${e.message}`);
@@ -413,6 +522,7 @@ export default function Page() {
       setSummary(data.summary);
       setTriangle(data.triangle);
       setCustomLDFs([]); // Clear custom LDF selections
+      setCustomIncurredLDFs([]); // Clear custom incurred LDF selections
       updateLogMessage(updateMsgId, 'Triangle configurations successfully updated. Triangle rebuilt.');
     } catch (e: any) {
       addLogMessage('error', `Configuration Update Failed: ${e.message}`);
@@ -442,6 +552,7 @@ export default function Page() {
       setSummary(data.summary);
       setTriangle(data.triangle);
       setCustomLDFs([]); // Clear custom LDF selections
+      setCustomIncurredLDFs([]); // Clear custom incurred LDF selections
       updateLogMessage(updateMsgId, 'Triangle successfully rebuilt with selected entity scope.');
     } catch (e: any) {
       addLogMessage('error', `Scope Update Failed: ${e.message}`);
@@ -458,6 +569,7 @@ export default function Page() {
         return summary ? (
           <SummaryView 
             summary={summary} 
+            currency={currency}
             onProceed={() => setStep(2)} 
             onUpdateMappings={handleUpdateMappings}
           />
@@ -467,6 +579,7 @@ export default function Page() {
           <TriangleView
             triangle={triangle}
             summary={summary}
+            currency={currency}
             ldfBase={ldfBase}
             onChangeLdfBase={(base) => {
               setLdfBase(base);
@@ -480,49 +593,56 @@ export default function Page() {
             onChangeCustomLDFs={setCustomLDFs}
             tailFactor={tailFactor}
             onChangeTailFactor={setTailFactor}
+            incurredLdfBase={incurredLdfBase}
+            onChangeIncurredLdfBase={(base) => {
+              setIncurredLdfBase(base);
+              if (triangle.incurred_ldfs) {
+                setCustomIncurredLDFs(triangle.incurred_ldfs.slice(0, -1).map((s: any) => s[base] ?? 1.0));
+              }
+            }}
+            customIncurredLDFs={
+              customIncurredLDFs.length > 0
+                ? customIncurredLDFs
+                : triangle.incurred_ldfs?.slice(0, -1).map((s: any) => s[incurredLdfBase] ?? 1.0) || []
+            }
+            onChangeCustomIncurredLDFs={setCustomIncurredLDFs}
+            incurredTailFactor={incurredTailFactor}
+            onChangeIncurredTailFactor={setIncurredTailFactor}
             onProceed={handleTriangleProceed}
             onUpdateEntities={handleUpdateEntities}
           />
         ) : null;
       case 3:
-        if (selectedMethod) {
-          const method = ranked.find((m) => m.code === selectedMethod);
-          const params = method ? method.params : [];
-          if (params.length > 0) {
-            return (
-              <ParamsView
-                code={selectedMethod}
-                params={params}
-                onSubmit={(vals) => handleExecuteModel(selectedMethod, vals)}
-              />
-            );
-          }
-        }
-        return (
-          <ModelSelector
-            ranked={ranked}
-            recommendation={recommendation}
-            onSelectMethod={(code) => {
-              setSelectedMethod(code);
-              const method = ranked.find((m) => m.code === code);
-              if (method && method.params.length === 0) {
-                handleExecuteModel(code, {});
-              }
-            }}
+        return triangle ? (
+          <ConfigureAssumptions
+            configs={configs}
+            onChangeConfigs={setConfigs}
+            triangle={triangle}
+            suggestedElrPaid={suggestedElrPaid}
+            suggestedElrIncurred={suggestedElrIncurred}
+            suggestedMatureYears={suggestedMatureYears}
+            matureCdfThreshold={matureCdfThreshold}
+            onChangeMatureCdfThreshold={setMatureCdfThreshold}
+            paidLdfBase={ldfBase}
+            incurredLdfBase={incurredLdfBase}
+            paidTailFactor={tailFactor}
+            incurredTailFactor={incurredTailFactor}
+            onBack={() => setStep(2)}
+            onRunComparison={handleExecuteAllModels}
           />
-        );
+        ) : null;
       case 4:
         return executeResult ? (
           <ResultsView
             data={executeResult}
+            currency={currency}
             onBack={() => {
-              setSelectedMethod(null);
               setStep(3);
             }}
           />
         ) : (
           <div className="flex flex-col flex-1 items-center justify-center text-text-sub h-64 font-mono">
-            ⏳ Executing actuarial engine calculations...
+            ⏳ Executing parallel actuarial engines & Reserve recommendation Agent...
           </div>
         );
       default:
@@ -540,9 +660,6 @@ export default function Page() {
   };
 
   const handleStepClick = (idx: number) => {
-    if (idx === 3) {
-      setSelectedMethod(null); // Reset selection to show the card selection view when navigating back to step 3
-    }
     setStep(idx);
   };
 
@@ -563,6 +680,15 @@ export default function Page() {
         />
 
         <div className="flex items-center gap-2.5">
+          <select 
+            value={currency} 
+            onChange={(e) => setCurrency(e.target.value as CurrencyCode)}
+            className="px-2 py-1.5 bg-bg-2 border border-border rounded text-xs text-text-sub font-medium hover:border-border-2 outline-none cursor-pointer"
+          >
+            {Object.entries(CURRENCIES).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-2 border border-border rounded text-xs text-text-sub font-medium hover:border-border-2 hover:text-text-main transition-colors cursor-pointer"

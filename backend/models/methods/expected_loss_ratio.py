@@ -27,10 +27,16 @@ class ExpectedLossRatio(MethodBase):
         
     def _compute(self):
         ays = self.triangle.accident_years
-        diag = self.triangle.get_latest_diagonal()
-        dev_idx = [next((i for i, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in self.triangle.matrix]
+        diag = [next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
+        dev_idx = [next((i for i, v in reversed(list(enumerate(row))) if v is not None and not np.isnan(v)), 0) for row in self.matrix]
         
-        n_mature = int(self.params.get('nMatureYears', 5))
+        mature_years = self.params.get('matureYears')
+        if mature_years:
+            is_mature = lambda i, ay: ay in mature_years
+        else:
+            n_mature = int(self.params.get('nMatureYears', 5))
+            is_mature = lambda i, ay: i < n_mature
+            
         lr_cap = float(self.params.get('lrCap', 5.0))
         
         # 1. Calculate historical LR for mature years
@@ -46,7 +52,7 @@ class ExpectedLossRatio(MethodBase):
             ult = paid * cdf
             
             # Is mature year
-            if i < n_mature:
+            if is_mature(i, ay):
                 if prem > 0 and ult > 0:
                     lr = ult / prem
                     # Apply guardrail
@@ -73,13 +79,14 @@ class ExpectedLossRatio(MethodBase):
             lower_bound = q1 - 1.5 * iqr
             upper_bound = q3 + 1.5 * iqr
             
-            for i, ay in enumerate(ays[:n_mature]):
-                prem = self.triangle.premiums.get(ay, 0)
-                ult = (diag[i] or 0) * (self.cdfs[dev_idx[i]] if dev_idx[i] < len(self.cdfs) else 1.0)
-                if prem > 0:
-                    lr = ult / prem
-                    if lr < lower_bound or lr > upper_bound:
-                        outliers.append(str(ay))
+            for i, ay in enumerate(ays):
+                if is_mature(i, ay):
+                    prem = self.triangle.premiums.get(ay, 0)
+                    ult = (diag[i] or 0) * (self.cdfs[dev_idx[i]] if dev_idx[i] < len(self.cdfs) else 1.0)
+                    if prem > 0:
+                        lr = ult / prem
+                        if lr < lower_bound or lr > upper_bound:
+                            outliers.append(str(ay))
         
         # 4. Project and Calculate IBNR for all years
         for i, ay in enumerate(ays):
@@ -88,7 +95,7 @@ class ExpectedLossRatio(MethodBase):
             idx = dev_idx[i]
             cdf = self.cdfs[idx] if idx < len(self.cdfs) else 1.0
             
-            if i < n_mature:
+            if is_mature(i, ay):
                 # Mature: standard chain ladder development
                 ultimate = paid * cdf
                 ibnr = ultimate - paid

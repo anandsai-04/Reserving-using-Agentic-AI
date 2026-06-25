@@ -5,13 +5,16 @@ class CaseOutstanding(MethodBase):
     code = 'CO'
     label = 'Case Outstanding'
     needs_premium = False
+    requires_paid_triangle = True
+    requires_incurred_triangle = True
+    supports_source_selection = False
     
     def _compute(self):
         ays = self.triangle.accident_years
-        diag = self.triangle.get_latest_diagonal()
+        diag = [next((v for v in reversed(row) if v is not None and not np.isnan(v)), 0) for row in (self.triangle.matrix if self.triangle.matrix else [])]
         
         inc_diag = []
-        for row in self.triangle.incurred_matrix:
+        for row in (self.triangle.incurred_matrix if self.triangle.incurred_matrix else []):
             val = None
             for v in reversed(row):
                 if v is not None and not np.isnan(v):
