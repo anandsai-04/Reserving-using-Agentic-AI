@@ -18,6 +18,7 @@ import {
 } from 'recharts';
 
 interface ResultsViewProps {
+  sessionId: string;
   data: ExecuteResult;
   currency?: CurrencyCode;
   onBack: () => void;
@@ -34,9 +35,39 @@ const PROCESS_EXPLANATIONS: Record<string, string> = {
   "ELR": "Expected Loss Ratio projects future losses as Premium × Expected Loss Ratio. It does not use development factors for immature years, acting as a stable baseline indicator."
 };
 
-export default function ResultsView({ data, currency = 'USD', onBack }: ResultsViewProps) {
+export default function ResultsView({ sessionId, data, currency = 'USD', onBack }: ResultsViewProps) {
   const [mounted, setMounted] = useState(false);
   const [selectedDetailCode, setSelectedDetailCode] = useState<string>('');
+  
+  const [auditState, setAuditState] = useState(data.compliance_audit || {});
+  const [editingRule, setEditingRule] = useState<string | null>(null);
+  const [overrideText, setOverrideText] = useState<string>('');
+  const [overrideCategory, setOverrideCategory] = useState<string>('');
+
+  const handleOverrideSubmit = async () => {
+    if (!editingRule || !overrideText.trim()) return;
+    
+    try {
+      const res = await fetch('/api/override_compliance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          category: overrideCategory,
+          rule: editingRule,
+          rationale: overrideText
+        })
+      });
+      const resData = await res.json();
+      if (!resData.success) throw new Error(resData.error);
+      
+      setAuditState(resData.compliance_audit);
+      setEditingRule(null);
+      setOverrideText('');
+    } catch (e: any) {
+      alert(`Override failed: ${e.message}`);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -434,11 +465,11 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── ASOP Compliance Audit Report ── */}
-      {data.compliance_audit && Object.keys(data.compliance_audit).length > 0 && (
+      {auditState && Object.keys(auditState).length > 0 && (
         <div className="mt-8 border-t border-dashed border-white/10 pt-8">
           <div className="text-sm font-bold text-white mb-6 uppercase tracking-wider flex items-center gap-2">
             <svg className="w-5 h-5 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -447,7 +478,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
             ASOP Compliance Audit Report
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {Object.entries(data.compliance_audit).map(([category, rules]) => (
+            {Object.entries(auditState).map(([category, rules]) => (
               <div key={category} className="bg-black/20 border border-white/10 rounded-lg p-5">
                 <div className="text-xs font-semibold text-accent mb-4 uppercase tracking-wider border-b border-white/10 pb-2 text-indigo-300">
                   {category}
@@ -461,6 +492,7 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
                           ruleObj.status === 'PASS' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
                           ruleObj.status === 'FAIL' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
                           ruleObj.status === 'WARNING' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                          ruleObj.status.includes('OVERRIDDEN') ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
                           'bg-blue-500/20 text-blue-400 border border-blue-500/30'
                         }`}>
                           {ruleObj.status.replace('_', ' ')}
@@ -469,6 +501,34 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
                       <div className="text-[10px] text-white/50 leading-relaxed">
                         {ruleObj.details}
                       </div>
+                      
+                      {ruleObj.status !== 'PASS' && !ruleObj.status.includes('OVERRIDDEN') && (
+                        <div className="mt-2">
+                          {editingRule === ruleObj.rule ? (
+                            <div className="flex flex-col gap-2 mt-2 bg-black/40 p-2 rounded border border-white/5">
+                              <textarea
+                                className="w-full bg-bg-1 border border-white/10 rounded p-2 text-[10px] text-white focus:outline-none focus:border-accent"
+                                rows={2}
+                                placeholder="Document actuarial rationale here to override..."
+                                value={overrideText}
+                                onChange={e => setOverrideText(e.target.value)}
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button onClick={() => { setEditingRule(null); setOverrideText(''); }} className="px-2 py-1 text-[9px] font-bold text-white/60 hover:text-white uppercase tracking-wider">Cancel</button>
+                                <button onClick={handleOverrideSubmit} className="px-2 py-1 text-[9px] font-bold bg-accent text-white rounded hover:bg-opacity-80 uppercase tracking-wider">Submit Override</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setEditingRule(ruleObj.rule); setOverrideCategory(category); setOverrideText(''); }}
+                              className="text-[9px] font-bold text-accent hover:text-white uppercase tracking-wider opacity-80 mt-1"
+                            >
+                              + Document Rationale
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      
                     </div>
                   ))}
                 </div>

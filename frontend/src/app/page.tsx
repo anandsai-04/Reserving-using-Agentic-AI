@@ -634,6 +634,7 @@ export default function Page() {
       case 4:
         return executeResult ? (
           <ResultsView
+            sessionId={sessionId!}
             data={executeResult}
             currency={currency}
             onBack={() => {

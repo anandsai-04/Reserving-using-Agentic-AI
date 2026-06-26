@@ -59,11 +59,16 @@ class ExecuteRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     session_id: str
-    message: str
-    history: list
+    user_text: str
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model_name: Optional[str] = None
+
+class OverrideRequest(BaseModel):
+    session_id: str
+    category: str
+    rule: str
+    rationale: str
 
 class ResumePipelineRequest(BaseModel):
     session_id: str
@@ -386,6 +391,29 @@ async def chat(req: ChatRequest):
         reply = agent_workflow.run_parallel_chat(req.session_id, req.message, req.history)
         
         return {"success": True, "reply": reply}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/override_compliance")
+async def override_compliance(req: OverrideRequest):
+    try:
+        session = agent_workflow.SESSION_STORE.get(req.session_id)
+        if not session or 'compliance_engine' not in session:
+            return {"success": False, "error": "Invalid session or compliance engine not found"}
+        
+        ce = session['compliance_engine']
+        found = False
+        for r in ce.audit_log.get(req.category, []):
+            if r['rule'] == req.rule:
+                r['status'] = "OVERRIDDEN_DOCUMENTED"
+                r['details'] = f"Override Rationale: {req.rationale} | Original: {r['details']}"
+                found = True
+                break
+        
+        if not found:
+            return {"success": False, "error": "Rule not found in specified category"}
+            
+        return {"success": True, "compliance_audit": ce.audit_log}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
