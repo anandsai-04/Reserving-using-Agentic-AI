@@ -766,6 +766,16 @@ async def execute_all_models(req: ExecuteRequest):
         timestamp = datetime.datetime.utcnow().isoformat() + "Z"
         selected_methods = [code for code, cfg in configs.items() if cfg.enabled]
 
+        # ── TOOL: Compliance Engine (ASOP) ────────────────────────────────────
+        compliance_audit = {}
+        if 'compliance_engine' in session:
+            ce = session['compliance_engine']
+            executed = [m["code"] for m in methods_out if m["status"] == "success"]
+            ce.run_estimation_checks(executed)
+            ce.run_selection_checks()
+            ce.run_results_checks()
+            compliance_audit = ce.audit_log
+
         session['results'] = {
             "run_id": run_id,
             "timestamp": timestamp,
@@ -796,7 +806,8 @@ async def execute_all_models(req: ExecuteRequest):
                 "selected_method": rec_code
             },
             "ai_recommendation": ai_recommendation,
-            "methods": methods_out
+            "methods": methods_out,
+            "compliance_audit": compliance_audit
         }
     except Exception as e:
         import traceback
