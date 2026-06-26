@@ -346,6 +346,13 @@ async def execute_model(req: ExecuteRequest):
         session['ratio_triangles'] = getattr(model, 'ratio_triangles', None) # If available
         session['curve_fitting_results'] = getattr(model, 'curve_fitting_results', None) # If available
 
+        # ── TOOL: Compliance Engine (ASOP) ────────────────────────────────────
+        ce = session['compliance_engine']
+        ce.run_estimation_checks(list(session['methods_executed']))
+        ce.run_selection_checks()
+        ce.run_results_checks()
+        compliance_audit = ce.audit_log
+
         return {
             "success":   True,
             "results":   session['results'],
@@ -359,7 +366,8 @@ async def execute_model(req: ExecuteRequest):
             "loss_ratios":   loss_ratios,
             "suggested_elr": elr_suggestion,
             "ldf_stability": ldf_stability,
-            "volatility":    session.get('volatility', 0)
+            "volatility":    session.get('volatility', 0),
+            "compliance_audit": compliance_audit
         }
     except Exception as e:
         import traceback

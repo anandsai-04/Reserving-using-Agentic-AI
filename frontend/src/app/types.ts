@@ -172,6 +172,7 @@ export interface ExecuteResult {
     on_level_premium: number;
   }[];
   volatility?: number;
+  compliance_audit?: Record<string, { rule: string; status: string; details: string }[]>;
   error?: string;
 }
 

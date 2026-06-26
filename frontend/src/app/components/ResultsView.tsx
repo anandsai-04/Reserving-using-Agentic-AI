@@ -434,8 +434,49 @@ export default function ResultsView({ data, currency = 'USD', onBack }: ResultsV
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* ── ASOP Compliance Audit Report ── */}
+      {data.compliance_audit && Object.keys(data.compliance_audit).length > 0 && (
+        <div className="mt-8 border-t border-dashed border-white/10 pt-8">
+          <div className="text-sm font-bold text-white mb-6 uppercase tracking-wider flex items-center gap-2">
+            <svg className="w-5 h-5 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            ASOP Compliance Audit Report
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {Object.entries(data.compliance_audit).map(([category, rules]) => (
+              <div key={category} className="bg-black/20 border border-white/10 rounded-lg p-5">
+                <div className="text-xs font-semibold text-accent mb-4 uppercase tracking-wider border-b border-white/10 pb-2 text-indigo-300">
+                  {category}
+                </div>
+                <div className="space-y-4">
+                  {rules.map((ruleObj, idx) => (
+                    <div key={idx} className="flex flex-col gap-1">
+                      <div className="flex items-start justify-between gap-4">
+                        <span className="text-xs font-medium text-white/90">{ruleObj.rule}</span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider whitespace-nowrap ${
+                          ruleObj.status === 'PASS' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                          ruleObj.status === 'FAIL' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                          ruleObj.status === 'WARNING' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                          'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                        }`}>
+                          {ruleObj.status.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-white/50 leading-relaxed">
+                        {ruleObj.details}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
