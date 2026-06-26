@@ -584,6 +584,61 @@ def run_reserve_recommendation_agent(session_id: str, results_summary: list) -> 
                 f"Parsing details: {str(e)}"
             ]
         }
+        
+# ==========================================
+# SINGLE MODEL DEEP DIVE REPORT AGENT
+# ==========================================
+
+def generate_single_model_report(session_id: str, method_code: str) -> str:
+    session = SESSION_STORE.get(session_id)
+    if not session:
+        return "Error: Session expired or invalid."
+    
+    api_key = session.get('api_key', '')
+    base_url = session.get('base_url', '')
+    model_name = session.get('model_name', '')
+    
+    results = session.get('results', {})
+    methods_out = results.get('methods', [])
+    
+    # Find the requested method
+    method_data = next((m for m in methods_out if (m.get('code') == method_code or m.get('result_id') == method_code)), None)
+    if not method_data:
+        return f"Error: No results found for method {method_code}."
+    
+    # Extract historical trends
+    trends_summary = ""
+    for r in method_data.get('results', []):
+        ay = r.get('ay')
+        paid = float(r.get('paid', 0))
+        ultimate = float(r.get('ultimate', 0))
+        ibnr = float(r.get('ibnr', 0))
+        pct_reported = float(r.get('pctReported', 0))
+        trends_summary += f"AY {ay}: Paid={paid:.0f}, Ultimate={ultimate:.0f}, IBNR={ibnr:.0f}, %Reported={pct_reported:.1f}%\n"
+    
+    sys_inst = (
+        "You are an expert actuarial AI assistant. Your task is to generate a detailed, professional "
+        "Markdown report analyzing a specific reserving method's results for a given dataset."
+    )
+    
+    prompt = (
+        f"Generate a deep dive actuarial report for the '{method_code}' method.\n\n"
+        f"Total Calculated Ultimate: {method_data.get('ultimate', 0):.2f}\n"
+        f"Total Calculated IBNR: {method_data.get('ibnr', 0):.2f}\n\n"
+        f"Historical Trends by Accident Year:\n{trends_summary}\n\n"
+        "Your report must be structured in clear Markdown and cover:\n"
+        "1. **Methodology Overview**: A brief summary of how this specific method works.\n"
+        "2. **Results Interpretation**: Analyze the IBNR and Ultimate distributions across the accident years. Are there any notable patterns (e.g., highly leveraged immature years, or stable mature years)?\n"
+        "3. **Reporting Speed Analysis**: Analyze the % Reported across years. Does the settlement speed seem reasonable for this model's assumptions?\n"
+        "4. **Strengths & Limitations**: What are the specific strengths and weaknesses of using THIS method on this profile?\n\n"
+        "Use professional actuarial tone. Do not use generic introductions. Dive straight into the report."
+    )
+    
+    try:
+        raw_response = run_agent(api_key, base_url, model_name, sys_inst, prompt, [])
+        return raw_response
+    except Exception as e:
+        return f"Failed to generate report for {method_code}: {str(e)}"
 
 
 # ==========================================

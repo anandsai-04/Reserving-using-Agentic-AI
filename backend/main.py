@@ -61,6 +61,10 @@ class ExecuteRequest(BaseModel):
     base_url: Optional[str] = None
     model_name: Optional[str] = None
 
+class SingleModelReportRequest(BaseModel):
+    session_id: str
+    method_code: str
+
 class ChatRequest(BaseModel):
     session_id: str
     user_text: str
@@ -419,6 +423,18 @@ async def override_compliance(req: OverrideRequest):
             
         return {"success": True, "compliance_audit": ce.audit_log}
     except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/generate_model_report")
+async def generate_model_report(req: SingleModelReportRequest):
+    try:
+        report = agent_workflow.generate_single_model_report(req.session_id, req.method_code)
+        if report.startswith("Error:") or report.startswith("Failed to generate"):
+            return {"success": False, "error": report}
+        return {"success": True, "report": report}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"success": False, "error": str(e)}
 
 @app.post("/api/execute_all")

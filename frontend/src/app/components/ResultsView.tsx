@@ -44,6 +44,9 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
   const [overrideText, setOverrideText] = useState<string>('');
   const [overrideCategory, setOverrideCategory] = useState<string>('');
 
+  const [modelReports, setModelReports] = useState<Record<string, string>>({});
+  const [generatingReportFor, setGeneratingReportFor] = useState<string | null>(null);
+
   // Dynamic API Base URL detection
   const getApiUrl = (endpoint: string) => {
     if (typeof window !== 'undefined') {
@@ -81,6 +84,39 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
     } catch (e: any) {
       alert(`Override failed: ${e.message}`);
     }
+  };
+
+  const generateDeepDiveReport = async (methodCode: string) => {
+    setGeneratingReportFor(methodCode);
+    try {
+      const res = await fetch(getApiUrl('generate_model_report'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, method_code: methodCode })
+      });
+      const resData = await res.json();
+      if (!resData.success) throw new Error(resData.error);
+      
+      setModelReports(prev => ({ ...prev, [methodCode]: resData.report }));
+    } catch (e: any) {
+      alert(`Report generation failed: ${e.message}`);
+    } finally {
+      setGeneratingReportFor(null);
+    }
+  };
+
+  const renderMarkdown = (text: string) => {
+    if (!text) return '';
+    let html = text
+      .replace(/### (.*?)(?=\n|$)/g, '<h4 class="text-sm font-bold text-text-main mt-4 mb-2">$1</h4>')
+      .replace(/## (.*?)(?=\n|$)/g, '<h3 class="text-md font-bold text-accent mt-5 mb-2">$1</h3>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/\n\n/g, '</p><p class="mt-2">')
+      .replace(/\n- (.*?)(?=\n|$)/g, '<li class="ml-4 list-disc">$1</li>')
+      .replace(/\n\d+\. (.*?)(?=\n|$)/g, '<li class="ml-4 list-decimal">$1</li>')
+      .replace(/\n/g, '<br />');
+    return `<p>${html}</p>`;
   };
 
   useEffect(() => {
@@ -427,6 +463,38 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* Deep Dive Report Box */}
+            <div className="bg-bg-1 border border-border p-5 rounded-lg mt-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-[10px] font-bold text-accent tracking-wider flex items-center gap-1.5">
+                  <span className="bg-accent text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px]">3</span>
+                  AI DEEP DIVE ANALYSIS
+                </div>
+                {!modelReports[selectedDetailCode] && (
+                  <button 
+                    onClick={() => generateDeepDiveReport(selectedDetailCode)}
+                    disabled={generatingReportFor === selectedDetailCode}
+                    className="px-4 py-2 bg-accent hover:bg-accent-hover disabled:bg-bg-3 disabled:text-text-muted text-white text-[11px] font-bold rounded transition-colors flex items-center gap-2"
+                  >
+                    {generatingReportFor === selectedDetailCode ? (
+                      <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Generating...</>
+                    ) : 'Generate Analysis Report'}
+                  </button>
+                )}
+              </div>
+              
+              {modelReports[selectedDetailCode] ? (
+                <div 
+                  className="text-[13px] text-text-sub leading-relaxed font-sans mt-2 pb-2"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(modelReports[selectedDetailCode]) }}
+                />
+              ) : (
+                <div className="text-xs text-text-muted italic">
+                  Generate a deep dive actuarial report tailored specifically to {selectedDetailCode}'s results.
+                </div>
+              )}
             </div>
 
             {/* Selected Method Trend Graphs */}
