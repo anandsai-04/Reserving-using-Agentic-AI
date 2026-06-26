@@ -44,11 +44,25 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
   const [overrideText, setOverrideText] = useState<string>('');
   const [overrideCategory, setOverrideCategory] = useState<string>('');
 
+  // Dynamic API Base URL detection
+  const getApiUrl = (endpoint: string) => {
+    if (typeof window !== 'undefined') {
+      const isLocal =
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1';
+      const base = isLocal
+        ? 'http://localhost:8000/api'
+        : 'https://reserving-using-agentic-ai-iaq0.onrender.com/api';
+      return `${base}/${endpoint}`;
+    }
+    return `/api/${endpoint}`;
+  };
+
   const handleOverrideSubmit = async () => {
     if (!editingRule || !overrideText.trim()) return;
     
     try {
-      const res = await fetch('/api/override_compliance', {
+      const res = await fetch(getApiUrl('override_compliance'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
