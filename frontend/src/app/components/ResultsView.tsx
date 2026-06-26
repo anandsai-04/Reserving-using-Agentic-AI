@@ -52,7 +52,7 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
         window.location.hostname === '127.0.0.1';
       const base = isLocal
         ? 'http://localhost:8000/api'
-        : 'https://reserving-using-agentic-ai-iaq0.onrender.com/api';
+        : 'https://reserving-using-agentic-ai.onrender.com/api';
       return `${base}/${endpoint}`;
     }
     return `/api/${endpoint}`;
