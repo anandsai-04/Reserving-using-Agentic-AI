@@ -67,7 +67,8 @@ class SingleModelReportRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     session_id: str
-    user_text: str
+    message: str
+    history: list = []
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model_name: Optional[str] = None
