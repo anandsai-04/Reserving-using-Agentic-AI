@@ -317,7 +317,7 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
             
             <ul className="list-disc pl-5 text-xs text-text-sub leading-relaxed space-y-1">
               {data.ai_recommendation.reasoning.map((r, i) => (
-                <li key={i}>{r}</li>
+                <li key={i} dangerouslySetInnerHTML={{ __html: r.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>') }} />
               ))}
             </ul>
           </div>
