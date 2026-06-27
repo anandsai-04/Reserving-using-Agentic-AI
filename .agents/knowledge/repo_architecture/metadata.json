@@ -1,0 +1,15 @@
+{
+  "title": "Repository Architecture & Component Map",
+  "summary": "Comprehensive map of all frontend components, backend API routes, AI agents, and actuarial models in the Reserving-using-Agentic-AI platform. Covers frontend-to-backend API mappings, agent roles (deterministic vs LLM-powered), the 8 actuarial methods, the sequential ingestion pipeline, the in-memory session store structure, and the full tech stack. Includes Mermaid diagrams for architecture, workflow, and agent mapping.",
+  "created_at": "2026-06-27",
+  "last_updated": "2026-06-27 (rev 9)",
+  "references": [
+    "backend/main.py",
+    "backend/agent_workflow.py",
+    "backend/models/",
+    "frontend/src/app/page.tsx",
+    "frontend/src/app/components/",
+    "frontend/src/app/types.ts",
+    "ARCHITECTURE_WALKTHROUGH.md"
+  ]
+}

@@ -690,6 +690,7 @@ Rules:
 4. Provide a detailed report of Settlement Rates (Closed vs Reported claims).
 5. Explain your chosen Tail Factor using the execution_report.
 6. If asked to on-level premiums, use tool 'calculate_on_level_premiums'.
+7. SCOPE RESTRICTION: You may ONLY answer questions related to actuarial reserving, loss development methodology, or the data and results in the current session. If a user asks anything outside this scope (e.g. general knowledge, coding, current events, personal advice), politely decline and redirect them: 'I am scoped to actuarial reserving analysis for this session. Please ask me about your loss triangle, IBNR results, LDF selection, or reserving methodology.'
 Be concise and actuarially precise."""
     
     api_key = session.get('api_key')

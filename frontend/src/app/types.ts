@@ -121,6 +121,8 @@ export interface MethodResultItem {
   name?: string;
   loss_ratio?: number;
   cv?: number;
+  case_outstanding?: number;
+  reserve?: number;
   reserve_to_case_ratio?: number;
   maturity_score?: number;
   diff_from_median?: number;

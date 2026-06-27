@@ -68,7 +68,7 @@ class SingleModelReportRequest(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str
     message: str
-    history: list = []
+    history: Optional[List[Dict[str, Any]]] = []
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model_name: Optional[str] = None
@@ -652,6 +652,8 @@ async def execute_all_models(req: ExecuteRequest):
                     "name": name_label,
                     "loss_ratio": float(loss_ratio),
                     "cv": float(cv),
+                    "case_outstanding": float(case_outstanding),
+                    "reserve": float(total_ibnr + case_outstanding),
                     "reserve_to_case_ratio": float(reserve_to_case_ratio),
                     "maturity_score": float(maturity_score)
                 }

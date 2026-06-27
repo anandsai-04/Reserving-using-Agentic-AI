@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { TriangleData, SummaryData } from '../types';
 import { fmtShort, CurrencyCode } from '../utils';
+import ExportMenu from './ExportMenu';
+import { downloadCSV, downloadExcel, downloadPDF, SheetDef, TableDef } from '../exportUtils';
 
 interface TriangleViewProps {
   triangle: TriangleData;
@@ -223,6 +225,189 @@ export default function TriangleView({
     const origSet = new Set(orig);
     return chosenEntities.some(e => !origSet.has(e));
   }, [entityMode, chosenEntities, summary]);
+
+  // ── Export Handlers ─────────────────────────────────────────────────────────
+
+  const buildTriangleSheets = () => {
+    const devHeaders = ['Accident Year', ...triangle.devAges.map((d) => `${d}mo`)];
+
+    // Paid triangle
+    const paidRows = triangle.accidentYears.map((ay, i) => [
+      ay,
+      ...triangle.matrix[i].map((v) => (v !== null ? Math.round(v) : null)),
+    ]);
+
+    // Incurred triangle (if present)
+    const hasInc =
+      triangle.incurred_matrix &&
+      triangle.incurred_matrix.some((r) => r && r.some((v) => v !== null));
+    const incRows = hasInc
+      ? triangle.accidentYears.map((ay, i) => [
+          ay,
+          ...triangle.incurred_matrix[i].map((v) =>
+            v !== null ? Math.round(v) : null
+          ),
+        ])
+      : [];
+
+    // Paid Age-to-Age factors (link ratios)
+    const ageToAgeHeaders = ['Accident Year', ...linkRatioHeaders.map((h) => `${h}mo`)];
+    const paidAgeToAgeRows = triangle.accidentYears.map((ay, i) => [
+      ay,
+      ...linkRatiosMatrix[i].map((v) => (v !== null ? Number(v.toFixed(4)) : null)),
+    ]);
+
+    // Incurred Age-to-Age factors (link ratios)
+    const incAgeToAgeRows = hasInc
+      ? triangle.accidentYears.map((ay, i) => [
+          ay,
+          ...incurredLinkRatiosMatrix[i].map((v) => (v !== null ? Number(v.toFixed(4)) : null)),
+        ])
+      : [];
+
+    const ldfKeys: Array<'volumeWeighted' | 'straightAvg' | 'weighted3yr' | 'weighted5yr'> = [
+      'volumeWeighted',
+      'straightAvg',
+      'weighted3yr',
+      'weighted5yr',
+    ];
+    const ldfLabels = [
+      'Volume Weighted',
+      'Straight Average',
+      '3-Year Weighted',
+      '5-Year Weighted',
+    ];
+
+    // Paid LDFs
+    const paidLdfHeaders = [
+      'Period',
+      ...triangle.ldfs.map((l) =>
+        l.isTail ? 'Tail' : `${l.fromAge}→${l.toAge}mo`
+      ),
+    ];
+    const paidLdfRows = ldfKeys.map((k, ki) => [
+      ldfLabels[ki],
+      ...triangle.ldfs.map((l) => {
+        const v = l[k];
+        return v !== null ? Number(v.toFixed(4)) : null;
+      }),
+    ]);
+
+    // Incurred LDFs
+    const incLdfs = triangle.incurred_ldfs || [];
+    const incLdfHeaders = [
+      'Period',
+      ...incLdfs.map((l) =>
+        l.isTail ? 'Tail' : `${l.fromAge}→${l.toAge}mo`
+      ),
+    ];
+    const incLdfRows = hasInc
+      ? ldfKeys.map((k, ki) => [
+          ldfLabels[ki],
+          ...incLdfs.map((l) => {
+            const v = l[k];
+            return v !== null ? Number(v.toFixed(4)) : null;
+          }),
+        ])
+      : [];
+
+    return {
+      hasInc,
+      paidTriangle: { headers: devHeaders, rows: paidRows },
+      incTriangle: hasInc ? { headers: devHeaders, rows: incRows } : null,
+      paidAgeToAge: { headers: ageToAgeHeaders, rows: paidAgeToAgeRows },
+      incAgeToAge: hasInc ? { headers: ageToAgeHeaders, rows: incAgeToAgeRows } : null,
+      paidLdf: { headers: paidLdfHeaders, rows: paidLdfRows },
+      incLdf: hasInc ? { headers: incLdfHeaders, rows: incLdfRows } : null,
+    };
+  };
+
+  const handleTriangleExportCSV = () => {
+    const { hasInc, paidTriangle, incTriangle, paidAgeToAge, incAgeToAge, paidLdf, incLdf } = buildTriangleSheets();
+    
+    const lines = [
+      '# Paid Loss Triangle',
+      paidTriangle.headers.join(','),
+      ...paidTriangle.rows.map((r) => r.map((v) => (v === null ? '' : String(v))).join(',')),
+      '',
+      '# Paid Age-to-Age Factors',
+      paidAgeToAge.headers.join(','),
+      ...paidAgeToAge.rows.map((r) => r.map((v) => (v === null ? '' : String(v))).join(',')),
+      '',
+      '# Paid LDF Table',
+      paidLdf.headers.join(','),
+      ...paidLdf.rows.map((r) => r.map((v) => (v === null ? '' : String(v))).join(',')),
+    ];
+
+    if (hasInc && incTriangle && incAgeToAge && incLdf) {
+      lines.push(
+        '',
+        '# Incurred Loss Triangle',
+        incTriangle.headers.join(','),
+        ...incTriangle.rows.map((r) => r.map((v) => (v === null ? '' : String(v))).join(',')),
+        '',
+        '# Incurred Age-to-Age Factors',
+        incAgeToAge.headers.join(','),
+        ...incAgeToAge.rows.map((r) => r.map((v) => (v === null ? '' : String(v))).join(',')),
+        '',
+        '# Incurred LDF Table',
+        incLdf.headers.join(','),
+        ...incLdf.rows.map((r) => r.map((v) => (v === null ? '' : String(v))).join(','))
+      );
+    }
+
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], {
+      type: 'text/csv;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'loss_triangle_and_ldfs.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleTriangleExportExcel = async () => {
+    const { hasInc, paidTriangle, incTriangle, paidAgeToAge, incAgeToAge, paidLdf, incLdf } = buildTriangleSheets();
+
+    const sheets: SheetDef[] = [
+      { name: 'Paid Triangle', headers: paidTriangle.headers, rows: paidTriangle.rows },
+      { name: 'Paid Age-to-Age', headers: paidAgeToAge.headers, rows: paidAgeToAge.rows },
+      { name: 'Paid LDFs', headers: paidLdf.headers, rows: paidLdf.rows },
+    ];
+
+    if (hasInc && incTriangle && incAgeToAge && incLdf) {
+      sheets.push(
+        { name: 'Incurred Triangle', headers: incTriangle.headers, rows: incTriangle.rows },
+        { name: 'Incurred Age-to-Age', headers: incAgeToAge.headers, rows: incAgeToAge.rows },
+        { name: 'Incurred LDFs', headers: incLdf.headers, rows: incLdf.rows }
+      );
+    }
+
+    await downloadExcel('loss_triangle_and_ldfs.xlsx', sheets);
+  };
+
+  const handleTriangleExportPDF = async () => {
+    const { hasInc, paidTriangle, incTriangle, paidAgeToAge, incAgeToAge, paidLdf, incLdf } = buildTriangleSheets();
+
+    const tables: TableDef[] = [
+      { title: 'Paid Loss Triangle', headers: paidTriangle.headers, rows: paidTriangle.rows },
+      { title: 'Paid Age-to-Age Factors', headers: paidAgeToAge.headers, rows: paidAgeToAge.rows },
+      { title: 'Paid Loss Development Factors (LDF) Table', headers: paidLdf.headers, rows: paidLdf.rows },
+    ];
+
+    if (hasInc && incTriangle && incAgeToAge && incLdf) {
+      tables.push(
+        { title: 'Incurred Loss Triangle', headers: incTriangle.headers, rows: incTriangle.rows },
+        { title: 'Incurred Age-to-Age Factors', headers: incAgeToAge.headers, rows: incAgeToAge.rows },
+        { title: 'Incurred Loss Development Factors (LDF) Table', headers: incLdf.headers, rows: incLdf.rows }
+      );
+    }
+
+    await downloadPDF('loss_triangle_and_ldfs.pdf', 'Loss Development Triangle & LDF Report', tables);
+  };
 
   return (
     <div className="flex flex-col flex-1 animate-slide-in space-y-6 overflow-y-auto pr-1">
@@ -634,7 +819,13 @@ export default function TriangleView({
       )}
 
       {/* ── Footer Navigation ────────────────────────────────────────── */}
-      <div className="flex justify-end pt-2">
+      <div className="flex justify-between items-center pt-2">
+        <ExportMenu
+          label="Export Triangle"
+          onExportCSV={() => handleTriangleExportCSV()}
+          onExportExcel={() => handleTriangleExportExcel()}
+          onExportPDF={() => handleTriangleExportPDF()}
+        />
         <button
           onClick={onProceed}
           className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white text-xs font-bold rounded shadow-[0_4px_16px_rgba(91,124,250,0.3)] transition-colors cursor-pointer"

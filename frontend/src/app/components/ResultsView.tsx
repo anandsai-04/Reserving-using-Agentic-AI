@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ExecuteResult, MethodResultItem } from '../types';
 import { fmt, fmtShort, CurrencyCode } from '../utils';
+import ExportMenu from './ExportMenu';
+import { downloadCSV, downloadExcel, downloadPDF, SheetDef, TableDef } from '../exportUtils';
 import {
   ResponsiveContainer,
   BarChart,
@@ -43,6 +45,7 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [overrideText, setOverrideText] = useState<string>('');
   const [overrideCategory, setOverrideCategory] = useState<string>('');
+  const [chartMetric, setChartMetric] = useState<'Ultimate' | 'Reserve' | 'IBNR'>('IBNR');
 
   const [modelReports, setModelReports] = useState<Record<string, string>>({});
   const [generatingReportFor, setGeneratingReportFor] = useState<string | null>(null);
@@ -176,7 +179,8 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
     return activeMethods.map(m => ({
       name: m.result_id || m.code,
       IBNR: m.ibnr || 0,
-      Ultimate: m.ultimate || 0
+      Ultimate: m.ultimate || 0,
+      Reserve: m.reserve || 0
     }));
   }, [activeMethods]);
 
@@ -184,6 +188,86 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
   const fmtPctDiff = (val: number) => {
     const sign = val > 0 ? '+' : '';
     return `${sign}${(val * 100).toFixed(1)}%`;
+  };
+
+  // ── Export Handlers ──────────────────────────────────────────────────────────
+
+  const COMPARISON_HEADERS = [
+    'Method Code', 'Method Name', 'Status',
+    'Projected Ultimate', 'Reserve', 'Projected IBNR',
+    'Diff vs Median', 'Impl. Loss Ratio', 'CV (Volatility)', 'Reserve/Case Ratio', 'Maturity Score',
+  ];
+
+  const buildComparisonRows = (): (string | number | null)[][] =>
+    (data.methods || []).map((m) => [
+      m.result_id || m.code || '',
+      m.name || m.method || '',
+      m.status,
+      m.status === 'success' ? Math.round(m.ultimate) : null,
+      m.status === 'success' && m.reserve != null ? Math.round(m.reserve) : null,
+      m.status === 'success' ? Math.round(m.ibnr) : null,
+      m.status === 'success' && m.diff_from_median != null ? fmtPctDiff(m.diff_from_median) : null,
+      m.status === 'success' && m.loss_ratio != null ? Number((m.loss_ratio * 100).toFixed(2)) : null,
+      m.status === 'success' && m.cv != null ? Number((m.cv * 100).toFixed(2)) : null,
+      m.status === 'success' && m.reserve_to_case_ratio != null ? Number(m.reserve_to_case_ratio.toFixed(3)) : null,
+      m.status === 'success' && m.maturity_score != null ? Number(m.maturity_score.toFixed(3)) : null,
+    ]);
+
+  const AY_DETAIL_HEADERS = ['Accident Year', 'Paid', 'Ultimate', 'IBNR', '% Reported'];
+
+  const buildAYDetailRows = (method: MethodResultItem | undefined): (string | number | null)[][] => {
+    if (!method?.results) return [];
+    return method.results.map((r: any) => [
+      r.ay,
+      r.paid != null ? Math.round(parseFloat(r.paid)) : null,
+      r.ultimate != null ? Math.round(parseFloat(r.ultimate)) : null,
+      r.ibnr != null ? Math.round(parseFloat(r.ibnr)) : null,
+      r.pctReported != null ? Number(parseFloat(r.pctReported).toFixed(1)) : null,
+    ]);
+  };
+
+  const AI_REC_HEADERS = ['Field', 'Value'];
+  const buildAIRecRows = (): (string | number | null)[][] => {
+    const rec = data.ai_recommendation;
+    if (!rec) return [];
+    return [
+      ['Recommended Method', rec.recommended_method],
+      ['Confidence', rec.confidence],
+      ...(rec.reasoning || []).map((r, i) => [`Reason ${i + 1}`, r] as [string, string]),
+    ];
+  };
+
+  const handleResultsExportCSV = () => {
+    const rows = buildComparisonRows();
+    downloadCSV('ibnr_results.csv', COMPARISON_HEADERS, rows);
+  };
+
+  const handleResultsExportExcel = async () => {
+    const recMethod = data.methods?.find(
+      (m) => (m.result_id || m.code) === data.ai_recommendation?.recommended_method && m.status === 'success'
+    );
+    const sheets: SheetDef[] = [
+      { name: 'Method Comparison', headers: COMPARISON_HEADERS, rows: buildComparisonRows() },
+      ...(recMethod
+        ? [{ name: `AY Detail (${recMethod.result_id || recMethod.code})`, headers: AY_DETAIL_HEADERS, rows: buildAYDetailRows(recMethod) }]
+        : []),
+      { name: 'AI Recommendation', headers: AI_REC_HEADERS, rows: buildAIRecRows() },
+    ];
+    await downloadExcel('ibnr_results.xlsx', sheets);
+  };
+
+  const handleResultsExportPDF = async () => {
+    const recMethod = data.methods?.find(
+      (m) => (m.result_id || m.code) === data.ai_recommendation?.recommended_method && m.status === 'success'
+    );
+    const tables: TableDef[] = [
+      { title: 'Method Comparison Summary', headers: COMPARISON_HEADERS, rows: buildComparisonRows() },
+      ...(recMethod
+        ? [{ title: `Accident Year Detail — ${recMethod.name || recMethod.result_id}`, headers: AY_DETAIL_HEADERS, rows: buildAYDetailRows(recMethod) }]
+        : []),
+      { title: 'AI Reserve Recommendation', headers: AI_REC_HEADERS, rows: buildAIRecRows() },
+    ];
+    await downloadPDF('ibnr_results.pdf', 'IBNR Reserving Indication Report', tables);
   };
 
   return (
@@ -195,12 +279,20 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
           <h2 className="text-base font-bold text-text-main">IBNR Reserving Indication Dashboard</h2>
           <p className="text-xs text-text-sub mt-0.5 font-sans">Compare multiple mathematical projection methodologies side-by-side.</p>
         </div>
-        <button
-          onClick={onBack}
-          className="px-3.5 py-1.5 bg-transparent border border-border-2 rounded text-xs text-text-sub hover:border-text-sub hover:text-text-main transition-colors cursor-pointer"
-        >
-          ← Adjust loss triangles
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportMenu
+            label="Export Results"
+            onExportCSV={handleResultsExportCSV}
+            onExportExcel={handleResultsExportExcel}
+            onExportPDF={handleResultsExportPDF}
+          />
+          <button
+            onClick={onBack}
+            className="px-3.5 py-1.5 bg-transparent border border-border-2 rounded text-xs text-text-sub hover:border-text-sub hover:text-text-main transition-colors cursor-pointer"
+          >
+            ← Adjust loss triangles
+          </button>
+        </div>
       </div>
 
       {/* 1. AI Recommendation Panel */}
@@ -257,8 +349,9 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
                 <th>Method Code</th>
                 <th>Method Name</th>
                 <th>Status</th>
-                <th>Projected IBNR</th>
                 <th>Projected Ultimate</th>
+                <th>Reserve</th>
+                <th>Projected IBNR</th>
                 <th>Diff vs Median</th>
                 <th>Impl. Loss Ratio</th>
                 <th>CV (Volatility)</th>
@@ -286,8 +379,9 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
                         {m.status}
                       </span>
                     </td>
-                    <td className="font-mono">{isSuccess ? fmt(m.ibnr, currency) : '—'}</td>
                     <td className="font-mono font-bold text-text-main">{isSuccess ? fmt(m.ultimate, currency) : '—'}</td>
+                    <td className="font-mono font-semibold text-accent-green">{isSuccess && m.reserve !== undefined ? fmt(m.reserve, currency) : '—'}</td>
+                    <td className="font-mono">{isSuccess ? fmt(m.ibnr, currency) : '—'}</td>
                     <td className={`font-mono ${m.diff_from_median !== undefined && m.diff_from_median > 0 ? 'text-accent-red' : 'text-accent-green'}`}>
                       {isSuccess && m.diff_from_median !== undefined ? fmtPctDiff(m.diff_from_median) : '—'}
                     </td>
@@ -307,10 +401,27 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
       {mounted && activeMethods.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* IBNR comparison chart */}
-          <div className="lg:col-span-2 bg-bg-1 border border-border rounded-lg p-5">
-            <div className="text-[11px] font-semibold text-text-sub mb-4 uppercase tracking-wider">
-              Projected IBNR Comparison
+          {/* comparison chart */}
+          <div className="lg:col-span-2 bg-bg-1 border border-border rounded-lg p-5 flex flex-col justify-between">
+            <div className="flex justify-between items-center mb-4">
+              <div className="text-[11px] font-semibold text-text-sub uppercase tracking-wider">
+                Method Comparison ({chartMetric})
+              </div>
+              <div className="flex gap-1 bg-bg-2 p-0.5 rounded border border-border/80">
+                {(['Ultimate', 'Reserve', 'IBNR'] as const).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setChartMetric(m)}
+                    className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-colors cursor-pointer select-none ${
+                      chartMetric === m
+                        ? 'bg-accent text-white shadow-sm'
+                        : 'bg-transparent text-text-muted hover:text-text-main'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="w-full h-[250px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -322,7 +433,7 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
                     contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
                     formatter={(v: any) => fmt(v, currency)}
                   />
-                  <Bar dataKey="IBNR" fill="#5b7cfa" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={chartMetric} fill="#5b7cfa" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
