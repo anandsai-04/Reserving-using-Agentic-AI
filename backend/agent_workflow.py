@@ -365,37 +365,37 @@ def execute_sequential_pipeline_part1(session: dict, rate_changes: list = None):
         # 2. Process Rate Changes
         t3 = build_loss_triangle(session)
         triangle = session.get('triangle')
-    preprocessing_text = "No premium data found in dataset to on-level."
-    if rate_changes and triangle and triangle.premiums:
-        try:
-            import pandas as pd
-            from models.on_level import OnLevelPremiumCalculator
-            prem_data = [{"accident_year": int(ay), "earned_premium": float(p)} for ay, p in triangle.premiums.items()]
-            calc = OnLevelPremiumCalculator(pd.DataFrame(prem_data), pd.DataFrame(rate_changes))
-            on_level_df = calc.calculate()
-            
-            # Update premiums in place before building the summary
-            triangle.premiums = dict(zip(on_level_df["accident_year"], on_level_df["on_level_premium"]))
-            preprocessing_text = "Action Result: Successfully calculated On-Level Premiums using the provided rate changes."
-        except Exception as e:
-            preprocessing_text = f"Action Result: Failed to calculate on-level premiums: {str(e)}"
-    elif rate_changes:
-        preprocessing_text = "Action Result: Rate changes were provided, but the uploaded dataset has no Premium column to on-level."
-    else:
-        preprocessing_text = "Action Result: No historical rate changes were provided."
+        preprocessing_text = "No premium data found in dataset to on-level."
+        if rate_changes and triangle and triangle.premiums:
+            try:
+                import pandas as pd
+                from models.on_level import OnLevelPremiumCalculator
+                prem_data = [{"accident_year": int(ay), "earned_premium": float(p)} for ay, p in triangle.premiums.items()]
+                calc = OnLevelPremiumCalculator(pd.DataFrame(prem_data), pd.DataFrame(rate_changes))
+                on_level_df = calc.calculate()
+                
+                # Update premiums in place before building the summary
+                triangle.premiums = dict(zip(on_level_df["accident_year"], on_level_df["on_level_premium"]))
+                preprocessing_text = "Action Result: Successfully calculated On-Level Premiums using the provided rate changes."
+            except Exception as e:
+                preprocessing_text = f"Action Result: Failed to calculate On-Level Premiums: {e}"
+        elif rate_changes:
+            preprocessing_text = "Action Result: Rate changes provided, but no premium data found to apply them to."
+        else:
+            preprocessing_text = "Action Result: No historical rate changes were provided."
 
-    # 3. Run remaining tools for part 1
-    t4 = calculate_ldfs(session)
-    
-    # 4. Stream Deterministic Outputs via Analysis Agent
-    yield emit("Analysis Agent", f"Data Ingestion: {t1}")
-    yield emit("Analysis Agent", f"Data Quality: {t2}")
-    yield emit("Analysis Agent", preprocessing_text)
-    yield emit("Analysis Agent", f"Triangle Builder: {t3}")
-    yield emit("Analysis Agent", f"LDF Calculator: {t4}")
+        # 3. Run remaining tools for part 1
+        t4 = calculate_ldfs(session)
+        
+        # 4. Stream Deterministic Outputs via Analysis Agent
+        yield emit("Analysis Agent", f"Data Ingestion: {t1}")
+        yield emit("Analysis Agent", f"Data Quality: {t2}")
+        yield emit("Analysis Agent", preprocessing_text)
+        yield emit("Analysis Agent", f"Triangle Builder: {t3}")
+        yield emit("Analysis Agent", f"LDF Calculator: {t4}")
 
-    # Seamlessly continue to part 2 using the newly provided context dropdowns
-    yield from execute_sequential_pipeline_part2(session)
+        # Seamlessly continue to part 2 using the newly provided context dropdowns
+        yield from execute_sequential_pipeline_part2(session)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -491,60 +491,62 @@ def execute_sequential_pipeline_part2(session: dict, conditions: dict = None):
         base_url = session.get('base_url')
         model_name = session.get('model_name')
     
-    def emit(agent, text):
-        return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
-
-    has_premium = bool(session.get('triangle') and session['triangle'].premiums)
-    business_context = session.get('business_context', '')
-    n_years = session.get('n_years')
-    
-    sorted_models, matrix_reason = compute_recommender_matrix(business_context, has_premium, n_years)
-    
-    best_model = sorted_models[0][0] if sorted_models else "None"
-    
-    # Construct mechanical HTML response
-    md_lines = [
-        f"<b>Mechanical Matrix Recommendation</b>",
-        f"<br/>The optimal method is <b>{best_model}</b>, {matrix_reason}.",
-        f"<br/><br/><b>Model Compatibility Scores:</b><br/>",
-        f"<i>(Higher is better. Incompatible models are hidden)</i><br/><ul style='margin-top: 8px;'>"
-    ]
-    for model, score in sorted_models:
-        md_lines.append(f"<li><b>{model}</b>: {score} points</li>")
-    md_lines.append("</ul>")
+        def emit(agent, text):
+            return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
+            
+        yield emit("Execution Agent", "Initializing actuarial models...")
         
-    recommender_text = "".join(md_lines)
-    yield emit("Recommender Agent", "I have analyzed the data and provided a model recommendation in the main panel.")
-
-    # Final Payload
-    updated_session = session
-    triangle = updated_session.get('triangle')
-    triangle_data = None
-    if triangle:
-        from models.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
-        mature_info = compute_mature_accident_years(triangle)
-        triangle_data = {
-            "accidentYears": triangle.accident_years,
-            "devAges": triangle.dev_ages,
-            "matrix": triangle.matrix,
-            "incurred_matrix": triangle.incurred_matrix,
-            "ldfs": updated_session.get('ldfs'),
-            "incurred_ldfs": updated_session.get('incurred_ldfs'),
-            "hasPremium": bool(triangle.premiums),
-            "suggested_elr_paid": compute_suggested_elr(triangle, "paid"),
-            "suggested_elr_incurred": compute_suggested_elr(triangle, "incurred"),
-            "suggested_mature_years": mature_info.get("mature_years", []),
-            "mature_reasoning": mature_info.get("reasoning", {}),
-            "method_availability": compute_method_availability(triangle)
-        }
+        has_premium = bool(session.get('triangle') and session['triangle'].premiums)
+        business_context = session.get('business_context', '')
+        n_years = session.get('n_years')
         
-        yield json.dumps({
-            "type": "complete",
-            "session_id": "stateless_session",
-            "summary": updated_session.get('summary'),
-            "triangle": triangle_data,
-            "recommendation": recommender_text
-        }) + "\n"
+        sorted_models, matrix_reason = compute_recommender_matrix(business_context, has_premium, n_years)
+        
+        best_model = sorted_models[0][0] if sorted_models else "None"
+        
+        # Construct mechanical HTML response
+        md_lines = [
+            f"<b>Mechanical Matrix Recommendation</b>",
+            f"<br/>The optimal method is <b>{best_model}</b>, {matrix_reason}.",
+            f"<br/><br/><b>Model Compatibility Scores:</b><br/>",
+            f"<i>(Higher is better. Incompatible models are hidden)</i><br/><ul style='margin-top: 8px;'>"
+        ]
+        for model, score in sorted_models:
+            md_lines.append(f"<li><b>{model}</b>: {score} points</li>")
+        md_lines.append("</ul>")
+            
+        recommender_text = "".join(md_lines)
+        yield emit("Recommender Agent", "I have analyzed the data and provided a model recommendation in the main panel.")
+        
+        # Final Payload
+        updated_session = session
+        triangle = updated_session.get('triangle')
+        triangle_data = None
+        if triangle:
+            from models.tools import compute_suggested_elr, compute_mature_accident_years, compute_method_availability
+            mature_info = compute_mature_accident_years(triangle)
+            triangle_data = {
+                "accidentYears": triangle.accident_years,
+                "devAges": triangle.dev_ages,
+                "matrix": triangle.matrix,
+                "incurred_matrix": triangle.incurred_matrix,
+                "ldfs": updated_session.get('ldfs'),
+                "incurred_ldfs": updated_session.get('incurred_ldfs'),
+                "hasPremium": bool(triangle.premiums),
+                "suggested_elr_paid": compute_suggested_elr(triangle, "paid"),
+                "suggested_elr_incurred": compute_suggested_elr(triangle, "incurred"),
+                "suggested_mature_years": mature_info.get("mature_years", []),
+                "mature_reasoning": mature_info.get("reasoning", {}),
+                "method_availability": compute_method_availability(triangle)
+            }
+            
+            yield json.dumps({
+                "type": "complete",
+                "session_id": "stateless_session",
+                "summary": updated_session.get('summary'),
+                "triangle": triangle_data,
+                "recommendation": recommender_text
+            }) + "\n"
     except Exception as e:
         import traceback
         traceback.print_exc()
