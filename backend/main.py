@@ -17,6 +17,10 @@ async def add_no_cache_headers(request: Request, call_next):
     response.headers["Expires"] = "0"
     return response
 
+@app.get("/api/version")
+async def get_version():
+    return {"version": "1.0.1_bugfix_part1_indent_and_except"}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
