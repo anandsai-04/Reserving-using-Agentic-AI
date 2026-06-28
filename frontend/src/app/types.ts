@@ -143,6 +143,7 @@ export interface ExecuteResult {
   incurred_ldfs?: number[];
   paid_tail_factor?: number;
   incurred_tail_factor?: number;
+  diagnostics?: any;
   configs?: ExecutionConfig;
   summary: {
     best_estimate: number;

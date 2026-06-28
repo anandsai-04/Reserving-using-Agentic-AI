@@ -61,6 +61,7 @@ class DataInspector:
         "development",
         "accident",
         "calendar",
+        "date"
     ]
 
     def __init__(
@@ -396,7 +397,45 @@ class DataInspector:
                 keywords_high=["claimnb", "claimcount", "claimnumber", "numclaims", "claims", "claim_nb"],
                 keywords_low=["count", "counts", "number"],
                 allowed_types=[SemanticType.NUMERIC_MEASURE],
-                exclude_keywords=["paid", "incur", "premium", "earned", "loss", "reserve"]
+                exclude_keywords=["paid", "incur", "premium", "earned", "loss", "reserve", "closed", "reported"]
+            ),
+            "transaction_date_col": get_best_column(
+                keywords_high=["transactiondate", "transdate", "t_date"],
+                keywords_low=["transaction", "date"],
+                allowed_types=[SemanticType.TIME_INDEX]
+            ),
+            "reporting_date_col": get_best_column(
+                keywords_high=["reportingdate", "reportdate", "r_date"],
+                keywords_low=["report", "date"],
+                allowed_types=[SemanticType.TIME_INDEX]
+            ),
+            "transaction_type_col": get_best_column(
+                keywords_high=["transactiontype", "transtype"],
+                keywords_low=["type"],
+                allowed_types=[SemanticType.CATEGORY]
+            ),
+            "transaction_amount_col": get_best_column(
+                keywords_high=["transactionamount", "transamount"],
+                keywords_low=["amount"],
+                allowed_types=[SemanticType.NUMERIC_MEASURE]
+            ),
+            "outstanding_col": get_best_column(
+                keywords_high=["caseoutstanding", "outstanding", "os", "reserve", "case"],
+                keywords_low=["res"],
+                allowed_types=[SemanticType.NUMERIC_MEASURE],
+                exclude_keywords=["paid", "incur", "premium"]
+            ),
+            "closed_count_col": get_best_column(
+                keywords_high=["closedcount", "closedclaims", "closed"],
+                keywords_low=["count"],
+                allowed_types=[SemanticType.NUMERIC_MEASURE],
+                exclude_keywords=["paid", "incur", "premium", "reported"]
+            ),
+            "reported_count_col": get_best_column(
+                keywords_high=["reportedcount", "reportedclaims", "reported"],
+                keywords_low=["count"],
+                allowed_types=[SemanticType.NUMERIC_MEASURE],
+                exclude_keywords=["paid", "incur", "premium", "closed"]
             )
         }
         return roles

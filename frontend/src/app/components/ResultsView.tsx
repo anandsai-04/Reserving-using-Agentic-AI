@@ -4,6 +4,7 @@ import { ExecuteResult, MethodResultItem } from '../types';
 import { fmt, fmtShort, CurrencyCode } from '../utils';
 import ExportMenu from './ExportMenu';
 import { downloadCSV, downloadExcel, downloadPDF, SheetDef, TableDef } from '../exportUtils';
+import WeibullFitChart from './WeibullFitChart';
 import {
   ResponsiveContainer,
   BarChart,
@@ -477,6 +478,11 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
             </div>
           </div>
         </div>
+      )}
+
+      {/* 3.5 Diagnostics (Weibull Fit) */}
+      {mounted && data.diagnostics?.weibull_fit && (
+        <WeibullFitChart data={data.diagnostics.weibull_fit} />
       )}
 
       {/* 4. Detailed Method Analysis */}

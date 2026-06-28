@@ -220,7 +220,7 @@ export default function SidebarChat({
               <span className={`text-[13px] flex-shrink-0 w-4 text-center mt-0.5 ${msg.state === 'analyzing' ? 'animate-pulse' : ''}`}>
                 {getIcon(msg.role)}
               </span>
-              <span className="flex-1" dangerouslySetInnerHTML={{ __html: msg.role === 'agent' || msg.role === 'model' ? renderMarkdown(msg.text) : msg.text }} />
+              <span className="flex-1" dangerouslySetInnerHTML={{ __html: msg.role === 'agent' || msg.role === 'model' ? parseMarkdownToHTML(msg.text) : msg.text }} />
             </div>
           );
         })}

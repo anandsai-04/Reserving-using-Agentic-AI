@@ -25,6 +25,9 @@ class Triangle:
         self.dev_ages = []
         self.matrix = []
         self.incurred_matrix = []
+        self.outstanding_matrix = []
+        self.closed_counts_matrix = []
+        self.reported_counts_matrix = []
         self.data_type = 'paid'
         self.premiums = {}
         self.exposures = {}
@@ -78,9 +81,9 @@ class Triangle:
         return t
         
     def _detect_format(self, header):
-        has_dev = any(any(c in h for c in ['dev', 'age', 'lag', 'period']) for h in header)
-        has_ay = any(any(c in h for c in ['accident', 'ay', 'origin', 'year']) and 'development' not in h for h in header)
-        has_loss = any(any(c in h for c in ['paid', 'loss', 'incurred', 'reported']) for h in header)
+        has_dev = any(any(c in h for c in ['dev', 'age', 'lag', 'period', 'transaction', 'date']) for h in header)
+        has_ay = any(any(c in h for c in ['accident', 'ay', 'origin', 'year', 'reporting', 'date']) and 'development' not in h for h in header)
+        has_loss = any(any(c in h for c in ['paid', 'loss', 'incurred', 'reported', 'amount']) for h in header)
         
         if has_dev and has_ay and has_loss:
             return 'long'
@@ -105,9 +108,38 @@ class Triangle:
 
         ay_col = get_col('origin_col', ['accidentyear', 'accident_year', 'ay', 'origin', 'year'])
         dev_col = get_col('dev_col', ['developmentlag', 'devlag', 'dev_age', 'dev', 'lag', 'age', 'period'])
+        
+        # Transactional Fallbacks
+        trans_date_col = get_col('transaction_date_col', ['transactiondate', 'transdate', 't_date', 'transaction'])
+        rep_date_col = get_col('reporting_date_col', ['reportingdate', 'reportdate', 'reporting', 'report'])
+        trans_type_col = get_col('transaction_type_col', ['transactiontype', 'transtype', 'type'])
+        trans_amt_col = get_col('transaction_amount_col', ['transactionamount', 'transamount', 'amount'])
+        
+        # Determine AY and Dev if missing but dates present
+        if not ay_col and rep_date_col:
+            df['__temp_ay'] = pd.to_datetime(df[rep_date_col], errors='coerce').dt.year
+            ay_col = '__temp_ay'
+        if not dev_col and trans_date_col and ay_col:
+            df['__temp_trans_year'] = pd.to_datetime(df[trans_date_col], errors='coerce').dt.year
+            df['__temp_dev'] = (df['__temp_trans_year'] - df[ay_col] + 1) * 12
+            dev_col = '__temp_dev'
+
         paid_col = get_col('paid_col', ['cumpaidloss', 'paid', 'loss'])
-        inc_col = get_col('incurred_col', ['incurloss', 'incurred', 'reported'])
+        inc_col = get_col('incurred_col', ['incurloss', 'incurred'])
+        os_col = get_col('outstanding_col', ['caseoutstanding', 'outstanding', 'os', 'reserve'])
+        
+        # Transactional Ledger Parsing
+        if trans_type_col and trans_amt_col:
+            df['__temp_paid'] = df.apply(lambda row: pd.to_numeric(row[trans_amt_col], errors='coerce') if 'paid' in str(row[trans_type_col]).lower() else 0, axis=1)
+            df['__temp_os'] = df.apply(lambda row: pd.to_numeric(row[trans_amt_col], errors='coerce') if any(x in str(row[trans_type_col]).lower() for x in ['os', 'reserve', 'outstanding', 'case']) else 0, axis=1)
+            paid_col = '__temp_paid'
+            os_col = '__temp_os'
+            inc_col = None # Will be summed from paid+os automatically later
+            
         cnt_col = get_col('count_col', ['count', 'claims', 'freq'])
+        closed_cnt_col = get_col('closed_count_col', ['closedcount', 'closed'])
+        rep_cnt_col = get_col('reported_count_col', ['reportedcount', 'reported'])
+
         prem_col = get_col('premium_col', ['earnedpremnet', 'earnedprem', 'premium', 'ep'])
         exp_col = get_col('exposure_col', ['exposure', 'units'])
         
@@ -132,33 +164,53 @@ class Triangle:
             dev_ages = sorted(df[dev_col].unique().tolist())
         self.dev_ages = dev_ages
         
-        # Apply early masking (truncation) before pivot
         if self.valuation_year is not None:
             df = df[df[ay_col] + (df[dev_col] / 12) - 1 <= self.valuation_year]
         
-        # 1. PIVOT TABLE APPROACH (Using the user's explicit function)
         def pivot_and_extract(value_col, agg="sum"):
             if value_col and value_col in df.columns:
                 df[value_col] = pd.to_numeric(df[value_col], errors='coerce')
-                
-                # Use the clean, global build_triangle function
                 pt = build_triangle(df, ay_col, dev_col, value_col, aggfunc=agg)
                 pt = pt.reindex(index=self.accident_years, columns=self.dev_ages)
-                
-                # "zoom down to only loss values" -> explicitly strip index and cols
                 matrix_values = pt.values.tolist()
                 return [[None if pd.isna(x) else float(x) for x in row] for row in matrix_values]
             return [[None] * len(self.dev_ages) for _ in self.accident_years]
 
         self.matrix = pivot_and_extract(paid_col)
         self.incurred_matrix = pivot_and_extract(inc_col)
+        self.outstanding_matrix = pivot_and_extract(os_col)
+        
+        # If incurred exists but outstanding doesn't, calculate outstanding
+        if inc_col and paid_col and not os_col:
+            for i in range(len(self.matrix)):
+                for j in range(len(self.matrix[i])):
+                    if self.incurred_matrix[i][j] is not None and self.matrix[i][j] is not None:
+                        self.outstanding_matrix[i][j] = self.incurred_matrix[i][j] - self.matrix[i][j]
+                        
+        # If paid and outstanding exists but incurred doesn't, calculate incurred
+        if paid_col and os_col and not inc_col:
+            for i in range(len(self.matrix)):
+                for j in range(len(self.matrix[i])):
+                    if self.outstanding_matrix[i][j] is not None and self.matrix[i][j] is not None:
+                        self.incurred_matrix[i][j] = self.outstanding_matrix[i][j] + self.matrix[i][j]
+
+        self.closed_counts_matrix = pivot_and_extract(closed_cnt_col)
+        self.reported_counts_matrix = pivot_and_extract(rep_cnt_col)
         
         count_matrix = pivot_and_extract(cnt_col)
+        
         for i, ay in enumerate(self.accident_years):
-            for v in reversed(count_matrix[i]):
+            # Try to grab counts from reported counts, then fallback to generic counts
+            rep_row = self.reported_counts_matrix[i]
+            for v in reversed(rep_row):
                 if v is not None:
                     self.counts[ay] = v
                     break
+            if ay not in self.counts:
+                for v in reversed(count_matrix[i]):
+                    if v is not None:
+                        self.counts[ay] = v
+                        break
 
         # Entity column detection for correct premium and exposure aggregation
         ent_col = None
