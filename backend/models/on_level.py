@@ -53,8 +53,9 @@ class OnLevelPremiumCalculator:
     # AVERAGE RATE LEVEL FOR AN AY
     # --------------------------------------------------
     def average_rate_level(self, ay):
-        start = pd.Timestamp(f"{ay}-01-01")
-        end = pd.Timestamp(f"{ay+1}-01-01")
+        ay_int = int(float(ay))
+        start = pd.Timestamp(f"{ay_int}-01-01")
+        end = pd.Timestamp(f"{ay_int+1}-01-01")
 
         breakpoints = [start]
 
