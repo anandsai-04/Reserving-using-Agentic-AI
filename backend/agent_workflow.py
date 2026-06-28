@@ -347,23 +347,24 @@ def execute_sequential_pipeline_part1(session: dict, rate_changes: list = None):
     """
     Generator that yields multi-agent responses progressively. Part 1.
     """
-    api_key = session.get('api_key')
-    base_url = session.get('base_url')
-    model_name = session.get('model_name')
-    
-    def emit(agent, text):
-        return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
-    
-    # 1. Run the initial parsing tools
-    t1 = ingest_csv(session)
-    t2 = perform_data_quality_checks(session)
-    
-    # Flush Cloudflare/Nginx buffer with 4KB of whitespace padding
-    yield json.dumps({"type": "padding", "data": " " * 4096}) + "\n"
-    
-    # 2. Process Rate Changes
-    t3 = build_loss_triangle(session)
-    triangle = session.get('triangle')
+    try:
+        api_key = session.get('api_key')
+        base_url = session.get('base_url')
+        model_name = session.get('model_name')
+        
+        def emit(agent, text):
+            return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
+        
+        # 1. Run the initial parsing tools
+        t1 = ingest_csv(session)
+        t2 = perform_data_quality_checks(session)
+        
+        # Flush Cloudflare/Nginx buffer with 4KB of whitespace padding
+        yield json.dumps({"type": "padding", "data": " " * 4096}) + "\n"
+        
+        # 2. Process Rate Changes
+        t3 = build_loss_triangle(session)
+        triangle = session.get('triangle')
     preprocessing_text = "No premium data found in dataset to on-level."
     if rate_changes and triangle and triangle.premiums:
         try:
@@ -395,6 +396,10 @@ def execute_sequential_pipeline_part1(session: dict, rate_changes: list = None):
 
     # Seamlessly continue to part 2 using the newly provided context dropdowns
     yield from execute_sequential_pipeline_part2(session)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        yield json.dumps({"type": "agent", "agent": "System Error", "text": f"Pipeline aborted due to backend error: {str(e)}"}) + "\n"
 
 def compute_recommender_matrix(business_context: str, has_premium: bool, n_years: int = None) -> tuple[str, str]:
     import json
@@ -481,9 +486,10 @@ def execute_sequential_pipeline_part2(session: dict, conditions: dict = None):
     """
     Generator that yields multi-agent responses progressively. Part 2.
     """
-    api_key = session.get('api_key')
-    base_url = session.get('base_url')
-    model_name = session.get('model_name')
+    try:
+        api_key = session.get('api_key')
+        base_url = session.get('base_url')
+        model_name = session.get('model_name')
     
     def emit(agent, text):
         return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
@@ -532,13 +538,17 @@ def execute_sequential_pipeline_part2(session: dict, conditions: dict = None):
             "method_availability": compute_method_availability(triangle)
         }
         
-    yield json.dumps({
-        "type": "complete",
-        "session_id": "stateless_session",
-        "summary": updated_session.get('summary'),
-        "triangle": triangle_data,
-        "recommendation": recommender_text
-    }) + "\n"
+        yield json.dumps({
+            "type": "complete",
+            "session_id": "stateless_session",
+            "summary": updated_session.get('summary'),
+            "triangle": triangle_data,
+            "recommendation": recommender_text
+        }) + "\n"
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        yield json.dumps({"type": "agent", "agent": "System Error", "text": f"Pipeline aborted due to backend error: {str(e)}"}) + "\n"
 
 def run_reserve_recommendation_agent(session_id: str, results_summary: list) -> dict:
     """Invokes the Reserve Recommender Agent to recommend the best method based on comparative outcomes."""
