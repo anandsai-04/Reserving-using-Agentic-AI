@@ -347,7 +347,6 @@ def execute_sequential_pipeline_part1(session: dict, rate_changes: list = None):
     """
     Generator that yields multi-agent responses progressively. Part 1.
     """
-    session = SESSION_STORE[session_id]
     api_key = session.get('api_key')
     base_url = session.get('base_url')
     model_name = session.get('model_name')
@@ -356,14 +355,14 @@ def execute_sequential_pipeline_part1(session: dict, rate_changes: list = None):
         return json.dumps({"type": "agent", "agent": agent, "text": text}) + "\n"
     
     # 1. Run the initial parsing tools
-    t1 = ingest_csv(session_id)
-    t2 = perform_data_quality_checks(session_id)
+    t1 = ingest_csv(session)
+    t2 = perform_data_quality_checks(session)
     
     # Flush Cloudflare/Nginx buffer with 4KB of whitespace padding
     yield json.dumps({"type": "padding", "data": " " * 4096}) + "\n"
     
     # 2. Process Rate Changes
-    t3 = build_loss_triangle(session_id)
+    t3 = build_loss_triangle(session)
     triangle = session.get('triangle')
     preprocessing_text = "No premium data found in dataset to on-level."
     if rate_changes and triangle and triangle.premiums:
@@ -385,7 +384,7 @@ def execute_sequential_pipeline_part1(session: dict, rate_changes: list = None):
         preprocessing_text = "Action Result: No historical rate changes were provided."
 
     # 3. Run remaining tools for part 1
-    t4 = calculate_ldfs(session_id)
+    t4 = calculate_ldfs(session)
     
     # 4. Stream Deterministic Outputs via Analysis Agent
     yield emit("Analysis Agent", f"Data Ingestion: {t1}")
@@ -395,7 +394,7 @@ def execute_sequential_pipeline_part1(session: dict, rate_changes: list = None):
     yield emit("Analysis Agent", f"LDF Calculator: {t4}")
 
     # Seamlessly continue to part 2 using the newly provided context dropdowns
-    yield from execute_sequential_pipeline_part2(session_id)
+    yield from execute_sequential_pipeline_part2(session)
 
 def compute_recommender_matrix(business_context: str, has_premium: bool, n_years: int = None) -> tuple[str, str]:
     import json
@@ -482,8 +481,7 @@ def execute_sequential_pipeline_part2(session: dict, conditions: dict = None):
     """
     Generator that yields multi-agent responses progressively. Part 2.
     """
-    session = SESSION_STORE[session_id]
-    api_key = session['api_key']
+    api_key = session.get('api_key')
     base_url = session.get('base_url')
     model_name = session.get('model_name')
     
@@ -536,7 +534,7 @@ def execute_sequential_pipeline_part2(session: dict, conditions: dict = None):
         
     yield json.dumps({
         "type": "complete",
-        "session_id": session_id,
+        "session_id": "stateless_session",
         "summary": updated_session.get('summary'),
         "triangle": triangle_data,
         "recommendation": recommender_text
