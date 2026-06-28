@@ -266,9 +266,9 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     is_default = (not api_key and not env_api_key) or (api_key == "ollama") or (base_url and "ngrok-free.dev" in base_url)
 
     # Fallbacks (UI > Environment > Hardcoded Defaults)
-    api_key = api_key or env_api_key or "ollama"
-    base_url = base_url or env_base_url or "https://encrypt-nail-smasher.ngrok-free.dev/v1"
-    model_name = model_name or env_model_name or "llama3.1"
+    api_key = api_key or env_api_key
+    base_url = base_url if base_url else env_base_url
+    model_name = model_name or env_model_name or "gpt-4o-mini"
     
     # Auto-correct Gemini native URL to OpenAI compatible URL
     if base_url and "generativelanguage.googleapis.com" in base_url:
@@ -739,9 +739,9 @@ Be concise and actuarially precise."""
     env_model_name = os.environ.get("LLM_MODEL_NAME")
 
     # Fallbacks (UI > Environment > Hardcoded Defaults)
-    api_key = api_key or env_api_key or "ollama"
-    base_url = base_url or env_base_url or "https://encrypt-nail-smasher.ngrok-free.dev/v1"
-    model_name = model_name or env_model_name or "llama3.1"
+    api_key = api_key or env_api_key
+    base_url = base_url if base_url else env_base_url
+    model_name = model_name or env_model_name or "gpt-4o-mini"
     
     if not api_key: return "Chat Agent Error: No API key provided."
 
