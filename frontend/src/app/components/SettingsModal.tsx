@@ -88,6 +88,8 @@ export default function SettingsModal({
               onChange={(e) => setApiKey(e.target.value)}
               className="w-full bg-bg-1 border border-border-2 rounded px-3 py-2 text-xs text-text-main font-mono outline-none focus:border-accent"
               placeholder="sk-..."
+              autoComplete="new-password"
+              spellCheck="false"
             />
           </div>
         </div>
