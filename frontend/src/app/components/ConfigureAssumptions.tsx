@@ -20,14 +20,12 @@ interface ConfigureAssumptionsProps {
 }
 
 export const AVAILABLE_METHODS = [
-  { code: 'CL', label: 'Chain Ladder', desc: 'Pure development projection.' },
-  { code: 'MCL', label: 'Mack Chain Ladder', desc: 'Standard errors & parameter uncertainty.' },
-  { code: 'BF', label: 'Bornhuetter-Ferguson', desc: 'Credibility method utilizing an a priori ELR.', needsPremium: true },
-  { code: 'BK', label: 'Benktander', desc: 'Iterative credibility method blending CL and BF.', needsPremium: true },
-  { code: 'CC', label: 'Cape Cod', desc: 'Exposure-adjusted credibility method.', needsPremium: true },
-  { code: 'ELR', label: 'Expected Loss Ratio', desc: 'Applies historical ELR from mature years Net of cap.', needsPremium: true },
-  { code: 'CLK', label: 'Clark Stochastic', desc: 'Continuous growth curve MLE projection.' },
-  { code: 'CO', label: 'Case Outstanding', desc: 'Assumes zero future newly-reported claims.' }
+  { code: 'CL', label: 'Chain Ladder (Basic)', desc: 'Standard volume-weighted link ratio projection.' },
+  { code: 'BF', label: 'Bornhuetter-Ferguson', desc: 'A priori exposure-based blending.', needsPremium: true },
+  { code: 'BK', label: 'Benktander', desc: 'Iterative credibility weighting of BF.', needsPremium: true },
+  { code: 'CC', label: 'Cape Cod (Stanard-Bühlmann)', desc: 'Used-up premium derived expected loss ratio.', needsPremium: true },
+  { code: 'CO', label: 'Case Outstanding', desc: 'Pure baseline: IBNR equals current case reserves.' },
+  { code: 'ELR', label: 'Expected Loss Ratio', desc: 'Ignores development, uses purely premium × ELR.', needsPremium: true },
 ];
 
 export default function ConfigureAssumptions({

@@ -43,12 +43,10 @@ export default function Page() {
   const [currency, setCurrency] = useState<CurrencyCode>('USD');
   const [configs, setConfigs] = useState<ExecutionConfig>({
     CL: { enabled: true, runPaid: true, runIncurred: true },
-    MCL: { enabled: true, runPaid: true, runIncurred: true },
     BF: { enabled: true, runPaid: true, runIncurred: false, aprioriLossRatio: null },
     BK: { enabled: true, runPaid: true, runIncurred: false, aprioriLossRatio: null, iterations: 2 },
     CC: { enabled: true, runPaid: true, runIncurred: false, decay: 0.9 },
     ELR: { enabled: true, runPaid: true, runIncurred: false, matureYears: [] },
-    CLK: { enabled: true, runPaid: true, runIncurred: false, curveType: 'weibull' },
     CO: { enabled: true, runPaid: true, runIncurred: true }
   });
   const [suggestedElrPaid, setSuggestedElrPaid] = useState<number | null>(65.0);
