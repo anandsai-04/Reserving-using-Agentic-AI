@@ -18,6 +18,7 @@ import {
   Area,
   LineChart,
   Line,
+  Cell,
 } from 'recharts';
 
 interface ResultsViewProps {
@@ -427,7 +428,21 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
                     contentStyle={{ backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid #334155', borderRadius: '8px', color: '#fff' }}
                     formatter={(v: any) => fmt(v, currency)}
                   />
-                  <Bar dataKey={chartMetric} fill="#5b7cfa" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={chartMetric} radius={[4, 4, 0, 0]}>
+                    {barChartData.map((entry, index) => {
+                      const colors = [
+                        '#3b82f6', // blue
+                        '#8b5cf6', // purple
+                        '#ec4899', // pink
+                        '#ef4444', // red
+                        '#f59e0b', // amber
+                        '#10b981', // emerald
+                        '#06b6d4', // cyan
+                        '#6366f1', // indigo
+                      ];
+                      return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
+                    })}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
