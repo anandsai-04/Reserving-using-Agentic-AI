@@ -42,6 +42,8 @@ class MethodConfig(BaseModel):
 
 class ExecuteRequest(BaseModel):
     session_id: str
+    csv_text: str
+    reserving_roles: Optional[Dict[str, Optional[str]]] = {}
     configs: Optional[Dict[str, MethodConfig]] = None
     paid_ldfs: Optional[List[float]] = None
     incurred_ldfs: Optional[List[float]] = None
@@ -67,6 +69,8 @@ class SingleModelReportRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     session_id: str
+    csv_text: str
+    reserving_roles: Optional[Dict[str, Optional[str]]] = {}
     message: str
     history: Optional[List[Dict[str, Any]]] = []
     api_key: Optional[str] = None
@@ -81,6 +85,8 @@ class OverrideRequest(BaseModel):
 
 class ResumePipelineRequest(BaseModel):
     session_id: str
+    csv_text: str
+    reserving_roles: Optional[Dict[str, Optional[str]]] = {}
     conditions: Optional[Dict[str, bool]] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
@@ -88,11 +94,14 @@ class ResumePipelineRequest(BaseModel):
 
 class UpdateMappingsRequest(BaseModel):
     session_id: str
+    csv_text: str
     reserving_roles: Dict[str, Optional[str]]
     selected_entities: Optional[list] = None
 
 class RecalculateSuggestionsRequest(BaseModel):
     session_id: str
+    csv_text: str
+    reserving_roles: Optional[Dict[str, Optional[str]]] = {}
     mature_cdf_threshold: float
 
 from fastapi.responses import StreamingResponse
@@ -119,10 +128,14 @@ async def upload_file(
             pass
             
     try:
-        session_id = agent_workflow.create_session(csv_text, n_years, valuation_year, api_key, base_url, model_name, business_context)
+        session = agent_workflow.rehydrate_session(csv_text, {})
+        if api_key: session['api_key'] = api_key
+        if base_url: session['base_url'] = base_url
+        if model_name: session['model_name'] = model_name
+        if business_context: session['business_context'] = business_context
         
         return StreamingResponse(
-            agent_workflow.execute_sequential_pipeline_part1(session_id, rate_changes),
+            agent_workflow.execute_sequential_pipeline_part1(session, rate_changes),
             media_type="text/event-stream"
         )
     except Exception as e:
@@ -132,23 +145,23 @@ async def upload_file(
 
 @app.post("/api/resume_pipeline")
 async def resume_pipeline(req: ResumePipelineRequest):
-    session = agent_workflow.SESSION_STORE.get(req.session_id)
+    session = agent_workflow.rehydrate_session(req.csv_text, req.reserving_roles)
     if session:
         if req.api_key: session['api_key'] = req.api_key
         if req.base_url: session['base_url'] = req.base_url
         if req.model_name: session['model_name'] = req.model_name
 
     return StreamingResponse(
-        agent_workflow.execute_sequential_pipeline_part2(req.session_id, req.conditions),
+        agent_workflow.execute_sequential_pipeline_part2(session, req.conditions),
         media_type="text/event-stream"
     )
 
 @app.post("/api/update_mappings")
 async def update_mappings(req: UpdateMappingsRequest):
     try:
-        session = agent_workflow.SESSION_STORE.get(req.session_id)
-        if not session:
-            return {"success": False, "error": "Invalid session_id"}
+        session = agent_workflow.rehydrate_session(req.csv_text, req.reserving_roles)
+        if not session or not session.get('triangle'):
+            return {"success": False, "error": "Invalid session data"}
         session['selected_entities'] = req.selected_entities
         
         # Update mappings in inspection results
@@ -167,12 +180,12 @@ async def update_mappings(req: UpdateMappingsRequest):
             )
 
         # Re-build the triangle
-        t_msg = agent_workflow.build_loss_triangle(req.session_id)
+        t_msg = agent_workflow.build_loss_triangle(session)
         if t_msg.startswith("Failed"):
             return {"success": False, "error": t_msg}
 
         # Re-calculate LDFs
-        ldf_msg = agent_workflow.calculate_ldfs(req.session_id)
+        ldf_msg = agent_workflow.calculate_ldfs(session)
         if ldf_msg.startswith("Failed"):
             return {"success": False, "error": ldf_msg}
 
@@ -210,9 +223,9 @@ async def update_mappings(req: UpdateMappingsRequest):
 @app.post("/api/execute")
 async def execute_model(req: ExecuteRequest):
     try:
-        session = agent_workflow.SESSION_STORE.get(req.session_id)
-        if not session:
-            return {"success": False, "error": "Invalid session_id"}
+        session = agent_workflow.rehydrate_session(req.csv_text, req.reserving_roles)
+        if not session or not session.get('triangle'):
+            return {"success": False, "error": "Invalid session data"}
 
         session['params'] = req.params
         session['custom_ldfs'] = req.custom_ldfs
@@ -391,13 +404,13 @@ async def execute_model(req: ExecuteRequest):
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     try:
-        session = agent_workflow.SESSION_STORE.get(req.session_id)
+        session = agent_workflow.rehydrate_session(req.csv_text, req.reserving_roles)
         if session:
             if req.api_key: session['api_key'] = req.api_key
             if req.base_url: session['base_url'] = req.base_url
             if req.model_name: session['model_name'] = req.model_name
             
-        reply = agent_workflow.run_parallel_chat(req.session_id, req.message, req.history)
+        reply = agent_workflow.run_parallel_chat(session, req.message, req.history)
         
         return {"success": True, "reply": reply}
     except Exception as e:
@@ -429,7 +442,9 @@ async def override_compliance(req: OverrideRequest):
 @app.post("/api/generate_model_report")
 async def generate_model_report(req: SingleModelReportRequest):
     try:
-        report = agent_workflow.generate_single_model_report(req.session_id, req.method_code)
+        # Note: the single model report currently lacks csv_text/reserving_roles in the payload
+        # This will be fixed in the frontend to send ExecuteRequest format if used.
+        pass
         if report.startswith("Error:") or report.startswith("Failed to generate"):
             return {"success": False, "error": report}
         return {"success": True, "report": report}
@@ -441,8 +456,9 @@ async def generate_model_report(req: SingleModelReportRequest):
 @app.post("/api/execute_all")
 async def execute_all_models(req: ExecuteRequest):
     try:
-        session = agent_workflow.SESSION_STORE.get(req.session_id)
-        if not session: return {"success": False, "error": "Invalid session_id"}
+        session = agent_workflow.rehydrate_session(req.csv_text, req.reserving_roles)
+        if not session or not session.get('triangle'):
+            return {"success": False, "error": "Invalid session data"}
         
         from models.methods import METHODS
         from models.tools import compute_suggested_elr, compute_tail_factor

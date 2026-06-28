@@ -13,38 +13,65 @@ from models.classifier import DataClassifier
 from models.inspector import DataInspector
 from models.compliance import ComplianceEngine
 
-# Global Session Store
-SESSION_STORE = {}
+# Global Session Store Removed - Fully Stateless Serverless Integration
+def rehydrate_session(csv_text: str, reserving_roles: dict = None) -> dict:
+    import pandas as pd
+    from io import StringIO
+    from models.triangle import Triangle
+    from models.compliance import ComplianceEngine
+    
+    session = {
+        'csv_text': csv_text,
+        'compliance_engine': ComplianceEngine(),
+        'methods_executed': set(),
+        'triangle': None,
+        'df': None,
+        'ldfs': None,
+        'incurred_ldfs': None,
+        'summary': None,
+        'inspection': None
+    }
+    
+    if not csv_text:
+        return session
+        
+    try:
+        df = pd.read_csv(StringIO(csv_text))
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        session['df'] = df
+        
+        t = Triangle(valuation_year=None, roles=reserving_roles or {})
+        t._format = t._detect_format(list(df.columns))
+        if t._format == 'long':
+            t._parse_long(df)
+        else:
+            t._parse_wide(df)
+        t._build_matrix()
+        
+        session['triangle'] = t
+        session['ldfs'] = t.compute_ldfs()
+        session['incurred_ldfs'] = t.compute_incurred_ldfs()
+        
+        summary = t.get_summary()
+        summary['entities'] = []
+        summary['selected_entities'] = []
+        session['summary'] = summary
+    except Exception as e:
+        print(f"Failed to rehydrate session: {e}")
+        
+    return session
 
 def create_session(csv_text: str, n_years: int, valuation_year: int = None, api_key: str = None, base_url: str = None, model_name: str = None, business_context: str = None) -> str:
     session_id = str(uuid.uuid4())
-    SESSION_STORE[session_id] = {
-        'csv_text': csv_text,
-        'n_years': n_years,
-        'valuation_year': valuation_year,
-        'api_key': api_key,
-        'base_url': base_url,
-        'model_name': model_name,
-        'business_context': business_context or '',
-        'df': None,
-        'triangle': None,
-        'ldfs': None,
-        'summary': None,
-        'recommendation': None,
-        'results': None,
-        'compliance_engine': ComplianceEngine(),
-        'methods_executed': set()
-    }
+    # State is now held strictly on the frontend to survive Vercel lambda cold starts.
     return session_id
 
 # ==========================================
 # TOOL FUNCTIONS
 # ==========================================
 
-def ingest_csv(session_id: str) -> str:
+def ingest_csv(session: dict) -> str:
     """Tool for Agent 1: Converts the raw CSV data into a Pandas DataFrame, classifies it, and maps reserving roles."""
-    session = SESSION_STORE.get(session_id)
-    if not session: return "Error: Invalid session ID."
     
     try:
         csv_text = session['csv_text']
@@ -86,10 +113,9 @@ def ingest_csv(session_id: str) -> str:
     except Exception as e:
         return f"Failed to parse CSV: {str(e)}"
 
-def perform_data_quality_checks(session_id: str) -> str:
+def perform_data_quality_checks(session: dict) -> str:
     """Tool for Data Quality Agent: Performs initial data quality checks using pandas."""
-    session = SESSION_STORE.get(session_id)
-    if not session or session['df'] is None: return "Error: DataFrame not found. Run ingest_csv first."
+    if not session or session.get('df') is None: return "Error: DataFrame not found. Run ingest_csv first."
     
     try:
         df = session['df']
@@ -113,10 +139,9 @@ def perform_data_quality_checks(session_id: str) -> str:
     except Exception as e:
         return f"Failed to perform data quality checks: {str(e)}"
 
-def build_loss_triangle(session_id: str) -> str:
+def build_loss_triangle(session: dict) -> str:
     """Tool for Agent 2: Converts the Pandas DataFrame into an actuarial Loss Triangle."""
-    session = SESSION_STORE.get(session_id)
-    if not session or session['df'] is None: return "Error: DataFrame not found. Run ingest_csv first."
+    if not session or session.get('df') is None: return "Error: DataFrame not found. Run ingest_csv first."
     
     try:
         val_year = session.get('valuation_year')
@@ -182,9 +207,8 @@ def build_loss_triangle(session_id: str) -> str:
         traceback.print_exc()
         return f"Failed to build triangle: {str(e)}"
 
-def calculate_ldfs(session_id: str) -> str:
+def calculate_ldfs(session: dict) -> str:
     """Tool for Agent 3: Calculates Loss Development Factors (LDFs) using the user's requested n_years."""
-    session = SESSION_STORE.get(session_id)
     if not session or session['triangle'] is None: return "Error: Triangle not found."
     
     try:
@@ -202,9 +226,8 @@ def calculate_ldfs(session_id: str) -> str:
     except Exception as e:
         return f"Failed to calculate LDFs: {str(e)}"
 
-def analyze_exposures_and_premiums(session_id: str) -> str:
+def analyze_exposures_and_premiums(session: dict) -> str:
     """Tool for Agent 5: Analyzes the premium and exposure volume data from the triangle."""
-    session = SESSION_STORE.get(session_id)
     if not session or session['triangle'] is None: return "Error: Triangle not found."
     
     try:
@@ -220,9 +243,8 @@ def analyze_exposures_and_premiums(session_id: str) -> str:
     except Exception as e:
         return f"Failed to analyze premiums: {str(e)}"
 
-def run_actuarial_model(session_id: str, method_code: str) -> str:
+def run_actuarial_model(session: dict, method_code: str) -> str:
     """Tool for Agent 6: Executes a specific mathematical reserving model (e.g. BF, CL, MCL, CC, BK, CO, CLK)."""
-    session = SESSION_STORE.get(session_id)
     if not session or session['triangle'] is None: return "Error: Triangle not found."
     
     try:
@@ -321,7 +343,7 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
 # SEQUENTIAL PIPELINE EXECUTOR
 # ==========================================
 
-def execute_sequential_pipeline_part1(session_id: str, rate_changes: list = None):
+def execute_sequential_pipeline_part1(session: dict, rate_changes: list = None):
     """
     Generator that yields multi-agent responses progressively. Part 1.
     """
@@ -456,7 +478,7 @@ def compute_recommender_matrix(business_context: str, has_premium: bool, n_years
     
     return sorted_models, reason_str
 
-def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
+def execute_sequential_pipeline_part2(session: dict, conditions: dict = None):
     """
     Generator that yields multi-agent responses progressively. Part 2.
     """
@@ -491,7 +513,7 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
     yield emit("Recommender Agent", "I have analyzed the data and provided a model recommendation in the main panel.")
 
     # Final Payload
-    updated_session = SESSION_STORE.get(session_id)
+    updated_session = session
     triangle = updated_session.get('triangle')
     triangle_data = None
     if triangle:
@@ -522,7 +544,6 @@ def execute_sequential_pipeline_part2(session_id: str, conditions: dict = None):
 
 def run_reserve_recommendation_agent(session_id: str, results_summary: list) -> dict:
     """Invokes the Reserve Recommender Agent to recommend the best method based on comparative outcomes."""
-    session = SESSION_STORE.get(session_id)
     if not session:
         return {
             "recommended_method": "None",
@@ -591,8 +612,7 @@ def run_reserve_recommendation_agent(session_id: str, results_summary: list) -> 
 # SINGLE MODEL DEEP DIVE REPORT AGENT
 # ==========================================
 
-def generate_single_model_report(session_id: str, method_code: str) -> str:
-    session = SESSION_STORE.get(session_id)
+def generate_single_model_report(session: dict, method_code: str) -> str:
     if not session:
         return "Error: Session expired or invalid."
     
@@ -686,8 +706,6 @@ def generate_single_model_report(session_id: str, method_code: str) -> str:
 
 def run_parallel_chat(session_id: str, message: str, history: list) -> str:
     """Agent that sits parallel to the pipeline, with access to all data and tools."""
-    session = SESSION_STORE.get(session_id)
-    if not session: return "Error: Session expired."
     
     try:
         from models.diagnostics import compute_diagnostics

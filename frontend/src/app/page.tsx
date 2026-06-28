@@ -27,6 +27,7 @@ export default function Page() {
   // UI Steps & State
   const [step, setStep] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [csvText, setCsvText] = useState<string | null>(null);
   const [triangle, setTriangle] = useState<TriangleData | null>(null);
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [recommendation, setRecommendation] = useState<string | null>(null);
@@ -266,6 +267,9 @@ export default function Page() {
       'analyzing'
     );
 
+    const text = await file.text();
+    setCsvText(text);
+
     const formData = new FormData();
     formData.append('file', file);
     formData.append('n_years', '5'); // Hardcoded default
@@ -313,6 +317,8 @@ export default function Page() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
+          csv_text: csvText,
+          reserving_roles: summary?.inspection?.reserving_roles || {},
           conditions: conditions,
           api_key: apiKey,
           base_url: baseUrl,
@@ -435,9 +441,12 @@ export default function Page() {
       paid_tail_factor: tailFactor,
       incurred_tail_factor: incurredTailFactor,
       mature_cdf_threshold: matureCdfThreshold,
+      csv_text: csvText,
+      reserving_roles: summary?.inspection?.reserving_roles || {},
       api_key: apiKey,
       base_url: baseUrl,
       model_name: modelName,
+      csv_text: csvText,
     };
 
     try {
@@ -473,8 +482,10 @@ export default function Page() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
+          csv_text: csvText,
+          reserving_roles: summary?.inspection?.reserving_roles || {},
           message: userText,
-          history: chatHistory,
+          history: messages.filter((m) => m.role !== 'system' && m.role !== 'action'),
           api_key: apiKey,
           base_url: baseUrl,
           model_name: modelName,
@@ -510,6 +521,7 @@ export default function Page() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
+          csv_text: csvText,
           reserving_roles: newRoles,
           selected_entities: selectedEntities || null,
         }),
@@ -540,6 +552,7 @@ export default function Page() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
+          csv_text: csvText,
           reserving_roles: summary?.inspection?.reserving_roles || {},
           selected_entities: selectedEntities,
         }),
