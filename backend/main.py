@@ -799,6 +799,10 @@ async def execute_all_models(req: ExecuteRequest):
             ce.run_results_checks()
             compliance_audit = ce.audit_log
 
+        from models.diagnostics import compute_diagnostics
+        diag_metrics = compute_diagnostics(t_eval_base) if t_eval_base else {}
+        session['diagnostics'] = diag_metrics
+
         session['results'] = {
             "run_id": run_id,
             "timestamp": timestamp,
@@ -812,7 +816,7 @@ async def execute_all_models(req: ExecuteRequest):
             "selected_method": rec_code,
             "ai_recommendation": ai_recommendation,
             "methods": methods_out,
-            "diagnostics": session.get('diagnostics')
+            "diagnostics": diag_metrics
         }
         
         return {
@@ -832,7 +836,7 @@ async def execute_all_models(req: ExecuteRequest):
             "ai_recommendation": ai_recommendation,
             "methods": methods_out,
             "compliance_audit": compliance_audit,
-            "diagnostics": session.get('diagnostics')
+            "diagnostics": diag_metrics
         }
     except Exception as e:
         import traceback
