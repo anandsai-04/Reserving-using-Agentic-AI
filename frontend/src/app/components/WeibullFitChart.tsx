@@ -157,10 +157,10 @@ export default function WeibullFitChart({ data }: WeibullFitChartProps) {
               type="monotone" 
               dataKey="fitted_pct" 
               name="Fitted Weibull Curve" 
-              stroke="#FF4500" 
+              stroke="#3b82f6" 
               strokeWidth={3}
               dot={false}
-              activeDot={false}
+              activeDot={{ r: 6 }}
             />
           </ComposedChart>
         </ResponsiveContainer>
