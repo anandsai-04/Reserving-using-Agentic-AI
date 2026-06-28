@@ -579,11 +579,11 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
                 <div>
                   <div className="text-[10px] font-bold text-accent tracking-wider mb-3 flex items-center gap-1.5">
                     <span className="bg-accent text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px]">2</span>
-                    MATHEMATICAL RESOURCING PROCESS
+                    MATHEMATICAL RESERVING PROCESS
                   </div>
                   <p className="text-xs text-text-sub leading-relaxed font-sans">
                     {selectedMethodDetail 
-                      ? (PROCESS_EXPLANATIONS[selectedMethodDetail.code || selectedMethodDetail.method || ''] || "Custom projection process.") 
+                      ? (PROCESS_EXPLANATIONS[(selectedMethodDetail.code || '').split('_')[0]] || PROCESS_EXPLANATIONS[selectedMethodDetail.method || ''] || "Custom projection process.") 
                       : "Select a method to see process details."}
                   </p>
                 </div>
