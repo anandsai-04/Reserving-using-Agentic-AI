@@ -748,6 +748,7 @@ Rules:
 5. Explain your chosen Tail Factor using the execution_report.
 6. If asked to on-level premiums, use tool 'calculate_on_level_premiums'.
 7. SCOPE RESTRICTION: You may ONLY answer questions related to actuarial reserving, loss development methodology, or the data and results in the current session. If a user asks anything outside this scope (e.g. general knowledge, coding, current events, personal advice), politely decline and redirect them: 'I am scoped to actuarial reserving analysis for this session. Please ask me about your loss triangle, IBNR results, LDF selection, or reserving methodology.'
+8. You have a tool called 'execute_actuarial_model' that you MUST use if the user asks you to run a specific model or test a specific assumption (like changing the a-priori ELR).
 Be concise and actuarially precise."""
     
     api_key = session.get('api_key')
@@ -802,6 +803,28 @@ Be concise and actuarially precise."""
                     "required": ["rate_changes"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "execute_actuarial_model",
+                "description": "Executes a specified actuarial reserving model to project IBNR and Ultimates.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "method_code": {
+                            "type": "string",
+                            "enum": ["CL", "MCL", "BF", "CC", "BK", "CO", "CLK"],
+                            "description": "The reserving method code."
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "Model specific parameters (e.g. {'aprioriLossRatio': 75} for BF, {'iterations': 2} for BK, {'curveType': 'weibull'} for CLK)"
+                        }
+                    },
+                    "required": ["method_code"]
+                }
+            }
         }
     ]
     
@@ -840,6 +863,38 @@ Be concise and actuarially precise."""
                             tool_result = on_level_df.to_json(orient="records")
                         except Exception as e:
                             tool_result = f"Error computing on-level premiums: {str(e)}"
+                            
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": tool_call.function.name,
+                        "content": tool_result
+                    })
+                elif tool_call.function.name == "execute_actuarial_model":
+                    args = json.loads(tool_call.function.arguments)
+                    method_code = args.get("method_code")
+                    params = args.get("params", {})
+                    
+                    triangle = session.get('triangle')
+                    if not triangle:
+                        tool_result = "Error: No triangle available."
+                    else:
+                        try:
+                            from models.methods import METHODS
+                            MethodClass = METHODS.get(method_code)
+                            if not MethodClass:
+                                tool_result = f"Error: Invalid method {method_code}"
+                            else:
+                                model = MethodClass()
+                                ldfs = [f['volumeWeighted'] for f in session['ldfs'][:-1]] + [1.0] if session.get('ldfs') else []
+                                model.fit(triangle, params, ldfs)
+                                tool_result = json.dumps({
+                                    "total_ibnr": model.get_total_ibnr(),
+                                    "total_ultimate": model.get_total_ultimate(),
+                                    "volatility": getattr(model, 'volatility', None)
+                                })
+                        except Exception as e:
+                            tool_result = f"Error executing model: {str(e)}"
                             
                     messages.append({
                         "role": "tool",
