@@ -811,7 +811,8 @@ async def execute_all_models(req: ExecuteRequest):
             "best_estimate": best_estimate_val,
             "selected_method": rec_code,
             "ai_recommendation": ai_recommendation,
-            "methods": methods_out
+            "methods": methods_out,
+            "diagnostics": session.get('diagnostics')
         }
         
         return {
@@ -830,7 +831,8 @@ async def execute_all_models(req: ExecuteRequest):
             },
             "ai_recommendation": ai_recommendation,
             "methods": methods_out,
-            "compliance_audit": compliance_audit
+            "compliance_audit": compliance_audit,
+            "diagnostics": session.get('diagnostics')
         }
     except Exception as e:
         import traceback
