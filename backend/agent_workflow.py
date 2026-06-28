@@ -273,6 +273,8 @@ def run_agent(api_key: str, base_url: str, model_name: str, sys_inst: str, promp
     # Auto-correct Gemini native URL to OpenAI compatible URL
     if base_url and "generativelanguage.googleapis.com" in base_url:
         base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    elif api_key and api_key.startswith("AIza") and not base_url:
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
         
     try:
         client = OpenAI(
@@ -744,6 +746,12 @@ Be concise and actuarially precise."""
     model_name = model_name or env_model_name or "gpt-4o-mini"
     
     if not api_key: return "Chat Agent Error: No API key provided."
+    
+    # Auto-route Gemini API keys to the correct Google endpoint if not specified
+    if api_key and api_key.startswith("AIza") and not base_url:
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    elif base_url and "generativelanguage.googleapis.com" in base_url:
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
     messages = [{"role": "system", "content": sys_inst}]
     for msg in history:
