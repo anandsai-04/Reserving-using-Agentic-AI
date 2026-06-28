@@ -194,9 +194,8 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
   // ── Export Handlers ──────────────────────────────────────────────────────────
 
   const COMPARISON_HEADERS = [
-    'Method Code', 'Method Name', 'Status',
-    'Projected Ultimate', 'Reserve', 'Projected IBNR',
-    'Diff vs Median', 'Impl. Loss Ratio', 'CV (Volatility)', 'Reserve/Case Ratio', 'Maturity Score',
+    'Method Code', 'Method Name', 'Status', 'Ultimate', 'Reserve', 'IBNR',
+    'Diff vs Median', 'Impl. Loss Ratio', 'Reserve/Case Ratio'
   ];
 
   const buildComparisonRows = (): (string | number | null)[][] =>
@@ -209,9 +208,7 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
       m.status === 'success' ? Math.round(m.ibnr) : null,
       m.status === 'success' && m.diff_from_median != null ? fmtPctDiff(m.diff_from_median) : null,
       m.status === 'success' && m.loss_ratio != null ? Number((m.loss_ratio * 100).toFixed(2)) : null,
-      m.status === 'success' && m.cv != null ? Number((m.cv * 100).toFixed(2)) : null,
       m.status === 'success' && m.reserve_to_case_ratio != null ? Number(m.reserve_to_case_ratio.toFixed(3)) : null,
-      m.status === 'success' && m.maturity_score != null ? Number(m.maturity_score.toFixed(3)) : null,
     ]);
 
   const AY_DETAIL_HEADERS = ['Accident Year', 'Paid', 'Ultimate', 'IBNR', '% Reported'];
@@ -355,9 +352,7 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
                 <th>Projected IBNR</th>
                 <th>Diff vs Median</th>
                 <th>Impl. Loss Ratio</th>
-                <th>CV (Volatility)</th>
                 <th>Reserve/Case Ratio</th>
-                <th>Maturity Score</th>
               </tr>
             </thead>
             <tbody>
@@ -387,9 +382,7 @@ export default function ResultsView({ sessionId, data, currency = 'USD', onBack 
                       {isSuccess && m.diff_from_median !== undefined ? fmtPctDiff(m.diff_from_median) : '—'}
                     </td>
                     <td className="font-mono">{isSuccess && m.loss_ratio !== undefined ? `${(m.loss_ratio * 100).toFixed(1)}%` : '—'}</td>
-                    <td className="font-mono">{isSuccess && m.cv ? `${(m.cv * 100).toFixed(1)}%` : '—'}</td>
                     <td className="font-mono">{isSuccess && m.reserve_to_case_ratio !== undefined ? m.reserve_to_case_ratio.toFixed(2) : '—'}</td>
-                    <td className="font-mono">{isSuccess && m.maturity_score !== undefined ? `${(m.maturity_score * 100).toFixed(1)}%` : '—'}</td>
                   </tr>
                 );
               })}
